@@ -75,11 +75,8 @@ jobs:
         with:
           submodules: recursive
           fetch-depth: 0
-      - name: Resolve the pinned Engine from this source checkout
-        shell: bash
-        run: |
-          engine_path="$(cd engine && pwd)"
-          git config --global url."file://${engine_path}".insteadOf https://github.com/UniClipboard/Engine.git
+      - name: Resolve the verified Engine from this source checkout
+        run: node integration/scripts/use-vendored-engine.mjs desktop/Cargo.toml engine
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: ${{ matrix.target }}
