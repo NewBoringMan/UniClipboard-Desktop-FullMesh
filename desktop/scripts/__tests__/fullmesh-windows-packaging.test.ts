@@ -28,8 +28,9 @@ describe('FullMesh Windows package matrix', () => {
     expect(script).toContain("ValidateSet('x64', 'arm64')")
     expect(script).toContain('New-SelfSignedCertificate')
     expect(script).toContain('Export-Certificate')
-    expect(script).toContain('certutil.exe -user -f -silent -addstore Root')
-    expect(script).toContain('certutil.exe -user -f -silent -delstore Root')
+    expect(script).toContain("Cert:\\LocalMachine\\TrustedPeople")
+    expect(script).not.toContain('Cert:\\CurrentUser\\Root')
+    expect(script).not.toContain('certutil.exe')
     expect(script).toContain('signtool verify')
     expect(script).toContain('Remove-Item $pfx')
 
@@ -38,7 +39,7 @@ describe('FullMesh Windows package matrix', () => {
     expect(lifecycle).toContain('shell:AppsFolder')
     expect(lifecycle).toContain("Get-Process -Name 'UniClipboard'")
     expect(lifecycle).toContain('Remove-AppxPackage')
-    expect(lifecycle).toContain('Cert:\\CurrentUser\\TrustedPeople')
+    expect(lifecycle).toContain('Cert:\\LocalMachine\\TrustedPeople')
   })
 
   it('collects MSIX, MSI, NSIS and portable artifacts for release', () => {
