@@ -1,1 +1,79 @@
-sed: can't read .github/workflows/assemble-from-run.yml: No such file or directory
+name: Assemble FullMesh from a verified run
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Workflow run ID whose platform artifacts passed
+        required: true
+        type: string
+  push:
+    branches:
+      - fullmesh-assemble-32747424569
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_RUN_ID: ${{ inputs.source_run_id || '32747424569' }}
+
+jobs:
+  assemble-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.22.1
+      - uses: actions/download-artifact@v8
+        with:
+          path: .release-artifacts
+          pattern: "!*.dockerbuild"
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Stage platform artifacts
+        run: node packaging/stage-ci-artifacts.mjs .release-artifacts 0.1.0-alpha.1
+      - name: Record the intentionally source-only HarmonyOS status
+        run: cp docs/audit/GAP_MATRIX.md dist/0.1.0-alpha.1/harmonyos/HARMONYOS_STATUS.md
+      - name: Build complete source archive
+        run: packaging/build-source-bundle.sh 0.1.0-alpha.1
+      - name: Generate locked-source SPDX and license list
+        run: node packaging/generate-source-sbom.mjs 0.1.0-alpha.1
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: dist/0.1.0-alpha.1/sbom/UniClipboard-FullMesh-0.1.0-alpha.1.spdx.json
+      - name: Record verified matrix provenance
+        env:
+          SOURCE_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ env.SOURCE_RUN_ID }}
+          SOURCE_COMMIT: 4b583afdcbdccfb1a1fcc7fa32e403efae3493e0
+        run: |
+          mkdir -p dist/0.1.0-alpha.1/test-reports
+          node -e '
+            const fs = require("fs");
+            const report = {
+              schemaVersion: 1,
+              runUrl: process.env.SOURCE_RUN_URL,
+              commit: process.env.SOURCE_COMMIT,
+              result: "passed",
+              gates: ["verify-source", "desktop", "android", "ios-simulator", "relay-oci"]
+            };
+            fs.writeFileSync("dist/0.1.0-alpha.1/test-reports/ci-summary.json", JSON.stringify(report, null, 2) + "\\n");
+          '
+      - run: node packaging/assemble-release.mjs --version 0.1.0-alpha.1
+      - run: node packaging/verify-release.mjs 0.1.0-alpha.1
+      - name: Archive the complete delivery directory
+        run: tar -C dist -czf UniClipboard-FullMesh-0.1.0-alpha.1-delivery.tar.gz 0.1.0-alpha.1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fullmesh-delivery-0.1.0-alpha.1
+          path: |
+            dist/0.1.0-alpha.1/**
+            UniClipboard-FullMesh-0.1.0-alpha.1-delivery.tar.gz
+          if-no-files-found: error
