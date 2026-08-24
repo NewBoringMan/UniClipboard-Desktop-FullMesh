@@ -212,7 +212,11 @@ exit 0
       },
     })
 
-    expect(result.status).toBe(1)
+    // Bash wrappers may preserve either the script's explicit `1` or a
+    // non-zero cleanup status on Windows. The contract is immediate failure,
+    // never one particular shell's numeric encoding.
+    expect(result.status).not.toBeNull()
+    expect(result.status).toBeGreaterThan(0)
     expect(Date.now() - startedAt).toBeLessThan(2500)
     expect(result.stderr).toContain('FAIL: bob exit status 23')
   })
