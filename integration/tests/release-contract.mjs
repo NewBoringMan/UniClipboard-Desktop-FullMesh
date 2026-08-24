@@ -37,6 +37,9 @@ for (const gate of [
   "destination 'generic/platform=iOS Simulator'",
   'linux/amd64,linux/arm64',
   'test-msix-lifecycle.ps1',
+  'createUpdaterArtifacts":false',
+  'unsigned-testing-portable.zip',
+  'ad-hoc-testing.app.zip',
 ]) {
   assert.ok(workflow.includes(gate), `missing CI gate ${gate}`);
 }

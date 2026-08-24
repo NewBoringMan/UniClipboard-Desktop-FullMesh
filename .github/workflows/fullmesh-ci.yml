@@ -109,6 +109,31 @@ jobs:
           else
             bun run tauri build ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
           fi
+      - name: Label Linux packages as unsigned testing artifacts
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: desktop
+        run: |
+          architecture="${{ matrix.target }}"
+          architecture="${architecture%%-*}"
+          while IFS= read -r package; do
+            extension="${package##*.}"
+            destination="$(dirname "$package")/UniClipboard-FullMesh-0.1.0-alpha.1-linux-${architecture}-unsigned-testing.${extension}"
+            mv "$package" "$destination"
+          done < <(find target -path '*/release/bundle/*/*' -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \))
+      - name: Label Windows installers as unsigned testing artifacts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: desktop
+        run: |
+          $releaseDir = if ('${{ matrix.args }}') { 'target/${{ matrix.target }}/release' } else { 'target/release' }
+          $architecture = if ('${{ matrix.target }}' -eq 'aarch64-pc-windows-msvc') { 'arm64' } else { 'x64' }
+          Get-ChildItem (Join-Path $releaseDir 'bundle') -Recurse -File |
+            Where-Object { $_.Extension -in @('.exe', '.msi') } |
+            ForEach-Object {
+              $destination = Join-Path $_.DirectoryName "UniClipboard-FullMesh-0.1.0-alpha.1-windows-$architecture-unsigned-testing$($_.Extension.ToLowerInvariant())"
+              Move-Item $_.FullName $destination -Force
+            }
       - name: Test Linux deb install, launch and clean uninstall
         if: runner.os == 'Linux'
         shell: bash
@@ -136,11 +161,16 @@ jobs:
           app="$(find target -path '*/release/bundle/macos/*.app' -type d -print -quit)"
           dmg="$(find target -path '*/release/bundle/dmg/*.dmg' -type f -print -quit)"
           test -n "$app" && test -n "$dmg"
+          architecture="${{ matrix.target }}"
+          architecture="${architecture%%-*}"
+          labeled_dmg="$(dirname "$dmg")/UniClipboard-FullMesh-0.1.0-alpha.1-macos-${architecture}-ad-hoc-testing.dmg"
+          app_zip="$(dirname "$app")/UniClipboard-FullMesh-0.1.0-alpha.1-macos-${architecture}-ad-hoc-testing.app.zip"
           codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict "$app"
           rm -f "$dmg"
-          hdiutil create -volname 'UniClipboard Testing' -srcfolder "$app" -ov -format UDZO "$dmg"
-          hdiutil verify "$dmg"
+          hdiutil create -volname 'UniClipboard Testing' -srcfolder "$app" -ov -format UDZO "$labeled_dmg"
+          hdiutil verify "$labeled_dmg"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$app_zip"
           binary="$(find "$app/Contents/MacOS" -type f -perm -111 -print -quit)"
           "$binary" >"$RUNNER_TEMP/uniclipboard-macos.log" 2>&1 &
           pid=$!
@@ -165,7 +195,7 @@ jobs:
           Copy-Item $daemon (Join-Path $stage 'uniclipd.exe')
           New-Item -ItemType File -Path (Join-Path $stage 'portable.dat') -Force | Out-Null
           Copy-Item 'packaging/windows/portable/README.txt' (Join-Path $stage 'README.txt')
-          Compress-Archive -Path "$stage/*" -DestinationPath (Join-Path $output "UniClipboard_0.1.0-alpha.1_${architecture}-portable.zip") -Force
+          Compress-Archive -Path "$stage/*" -DestinationPath (Join-Path $output "UniClipboard-FullMesh-0.1.0-alpha.1-windows-${architecture}-unsigned-testing-portable.zip") -Force
       - name: Package Windows test-signed MSIX
         if: runner.os == 'Windows'
         shell: pwsh

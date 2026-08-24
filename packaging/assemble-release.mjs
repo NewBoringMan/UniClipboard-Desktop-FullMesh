@@ -65,12 +65,20 @@ function architecturesFor(name) {
 
 function signingFor(path) {
   const lower = path.toLowerCase();
-  if (lower.includes('test-signed') || lower.includes('testing')) return 'test-signed';
-  if (lower.includes('ad-hoc') || lower.includes('adhoc')) return 'ad-hoc';
-  if (lower.includes('unsigned')) return 'unsigned-testing';
-  if (lower.startsWith('source/') || lower.startsWith('sbom/') || lower.startsWith('test-reports/')) {
+  if (
+    lower.startsWith('source/') ||
+    lower.startsWith('sbom/') ||
+    lower.startsWith('test-reports/') ||
+    lower.startsWith('engine/') ||
+    lower.startsWith('harmonyos/') ||
+    /\.(cer|json|md|pom|swift|txt)$/.test(lower)
+  ) {
     return 'not-applicable';
   }
+  if (lower.includes('ad-hoc') || lower.includes('adhoc')) return 'ad-hoc';
+  if (lower.includes('test-signed') || lower.includes('testing')) return 'test-signed';
+  if (lower.includes('unsigned')) return 'unsigned-testing';
+  if (lower.startsWith('relay/')) return 'unsigned-testing';
   return 'unverified';
 }
 
