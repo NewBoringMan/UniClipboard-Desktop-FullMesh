@@ -32,6 +32,7 @@ for (const gate of [
   'cargo test --workspace --locked',
   'scripts/build-android-release.sh',
   'scripts/verify-android-release.sh',
+  'npm test -- --runInBand',
   'android-emulator-runner',
   'prepare-local-unified-engine-core.sh engine',
   "destination 'generic/platform=iOS Simulator'",

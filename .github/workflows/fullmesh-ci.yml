@@ -252,6 +252,11 @@ jobs:
         run: engine/bindings/uc-engine-uniffi/scripts/build-android-aar.sh
       - run: npm ci
         working-directory: mobile
+      - name: Run mobile static checks and unit/UI component tests
+        working-directory: mobile
+        run: |
+          npm run check:quality
+          npm test -- --runInBand
       - run: npx expo prebuild -p android --clean --no-install
         working-directory: mobile
         env:
