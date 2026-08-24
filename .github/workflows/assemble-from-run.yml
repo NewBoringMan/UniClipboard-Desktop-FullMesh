@@ -48,9 +48,10 @@ jobs:
       - name: Generate locked-source SPDX and license list
         run: |
           cp desktop/Cargo.toml "$RUNNER_TEMP/desktop-Cargo.toml"
-          trap 'cp "$RUNNER_TEMP/desktop-Cargo.toml" desktop/Cargo.toml' EXIT
+          cp desktop/Cargo.lock "$RUNNER_TEMP/desktop-Cargo.lock"
+          trap 'cp "$RUNNER_TEMP/desktop-Cargo.toml" desktop/Cargo.toml; cp "$RUNNER_TEMP/desktop-Cargo.lock" desktop/Cargo.lock' EXIT
           node integration/scripts/use-vendored-engine.mjs desktop/Cargo.toml engine
-          cargo fetch --manifest-path desktop/Cargo.toml --locked
+          cargo fetch --manifest-path desktop/Cargo.toml
           node packaging/generate-source-sbom.mjs 0.1.0-alpha.1
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@v0
