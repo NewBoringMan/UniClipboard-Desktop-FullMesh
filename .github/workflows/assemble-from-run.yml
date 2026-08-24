@@ -29,6 +29,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22.22.1
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: Prime locked Cargo sources for offline SBOM metadata
+        run: cargo fetch --manifest-path engine/Cargo.toml --locked
       - uses: actions/download-artifact@v8
         with:
           path: .release-artifacts

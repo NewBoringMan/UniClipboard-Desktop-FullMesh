@@ -50,6 +50,7 @@ for (const gate of [
   'android-universal-test-signed.aab',
   'relay-amd64-arm64-unsigned-testing.oci.tar',
   'pattern: "!*.dockerbuild"',
+  'cargo fetch --manifest-path engine/Cargo.toml --locked',
 ]) {
   assert.ok(workflow.includes(gate), `missing CI gate ${gate}`);
 }
