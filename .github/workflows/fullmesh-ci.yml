@@ -3,7 +3,7 @@ name: FullMesh CI and package matrix
 on:
   pull_request:
   push:
-    branches: [main, fullmesh-ci]
+    branches: [main, fullmesh-ci, fullmesh-ci-v7]
   workflow_dispatch:
 
 permissions:
