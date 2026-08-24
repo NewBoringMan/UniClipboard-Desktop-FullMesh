@@ -94,9 +94,15 @@ jobs:
         working-directory: desktop
       - run: bun run test --run
         working-directory: desktop
+      - name: Build and stage the daemon sidecar
+        working-directory: desktop
+        shell: bash
+        run: node scripts/prepare-daemon-sidecar.mjs ${{ matrix.args }}
       - name: Build native installers
         working-directory: desktop
         shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             bun run tauri build ${{ matrix.args }} --bundles nsis,msi
