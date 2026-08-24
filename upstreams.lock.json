@@ -18,9 +18,9 @@
       "sourceRepository": "https://github.com/UniClipboard/UniClipboard.git",
       "branch": "main",
       "upstreamCommit": "71000a0e2baf43eec0b0d80ec3244824735c0096",
-      "sourceCommit": "8cce679be5ff5a71015c962d250a5b8d12b8e2aa",
-      "commit": "36eaf964ff9e19962ea7071b1e80e4f09876bd0f",
-      "tree": "4ca7ff95d34709539113980f929783b7bbe406a6",
+      "sourceCommit": "e6d65aff2a46be0d300f2e4048a0c7f274cc67de",
+      "commit": "87f7962738ff951a94928272395fe6b7d3f8b3e2",
+      "tree": "be8b489e020259b7bd7a3440b7e4fdae595a3ea9",
       "tag": "v1.0.0-alpha.7",
       "stableTag": "v0.19.1",
       "license": "AGPL-3.0-only"
