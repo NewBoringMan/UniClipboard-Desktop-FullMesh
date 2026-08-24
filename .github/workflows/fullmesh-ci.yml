@@ -267,6 +267,15 @@ jobs:
         env:
           UC_ENGINE_EXPECTED_AAR: ${{ github.workspace }}/engine/target/uc-engine-uniffi-dist/android/UniClipboardEngine.aar
         run: bash scripts/verify-android-release.sh
+      - name: Package explicitly test-signed Android artifacts
+        working-directory: mobile
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-arm64-v8a-release.apk release/UniClipboard-FullMesh-0.1.0-alpha.1-android-arm64-v8a-test-signed.apk
+          cp android/app/build/outputs/apk/release/app-armeabi-v7a-release.apk release/UniClipboard-FullMesh-0.1.0-alpha.1-android-armeabi-v7a-test-signed.apk
+          cp android/app/build/outputs/apk/release/app-x86_64-release.apk release/UniClipboard-FullMesh-0.1.0-alpha.1-android-x86_64-test-signed.apk
+          cp android/app/build/outputs/apk/release/app-universal-release.apk release/UniClipboard-FullMesh-0.1.0-alpha.1-android-universal-test-signed.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab release/UniClipboard-FullMesh-0.1.0-alpha.1-android-universal-test-signed.aab
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -280,8 +289,7 @@ jobs:
         with:
           name: android-installers
           path: |
-            mobile/android/app/build/outputs/apk/release/*.apk
-            mobile/android/app/build/outputs/bundle/release/*.aab
+            mobile/release/*
             engine/target/uc-engine-uniffi-dist/android/*
           if-no-files-found: error
 
@@ -369,11 +377,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           tags: uniclipboard/fullmesh-relay:${{ github.sha }}
-          outputs: type=oci,dest=/tmp/uniclipboard-fullmesh-relay.oci.tar
+          outputs: type=oci,dest=/tmp/UniClipboard-FullMesh-0.1.0-alpha.1-relay-amd64-arm64-unsigned-testing.oci.tar
       - uses: actions/upload-artifact@v7
         with:
           name: relay-oci
-          path: /tmp/uniclipboard-fullmesh-relay.oci.tar
+          path: /tmp/UniClipboard-FullMesh-0.1.0-alpha.1-relay-amd64-arm64-unsigned-testing.oci.tar
           if-no-files-found: error
 
   assemble-release:

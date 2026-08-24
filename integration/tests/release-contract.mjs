@@ -40,6 +40,8 @@ for (const gate of [
   'createUpdaterArtifacts":false',
   'unsigned-testing-portable.zip',
   'ad-hoc-testing.app.zip',
+  'android-universal-test-signed.aab',
+  'relay-amd64-arm64-unsigned-testing.oci.tar',
 ]) {
   assert.ok(workflow.includes(gate), `missing CI gate ${gate}`);
 }
