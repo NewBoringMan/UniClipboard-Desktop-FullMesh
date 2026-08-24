@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-23T00:00:00Z",
+  "generatedAt": "2026-08-24T00:00:00Z",
   "components": {
     "engine": {
       "repository": "https://github.com/NewBoringMan/UniClipboard-Engine-FullMesh.git",
       "sourceRepository": "https://github.com/UniClipboard/Engine.git",
       "branch": "main",
       "upstreamCommit": "31c149c5bfb8a8edfe80c94944c8255157a3a3af",
-      "sourceCommit": "0095e11322e3dfdb4fa136632346ce6b12114856",
-      "commit": "b5cb1fceb65c5d44bd2074c082376044227821b3",
-      "tree": "efa1e5564a9beb72584e12e8c0297a31a114a238",
+      "sourceCommit": "ba52d90b582d21f0836331cefd2ae925f763313a",
+      "commit": "a65fc36a954910a3980fc27752812c0630a31eb6",
+      "tree": "11a13c7a31841a042f88f36e5747c74c1a2568d1",
       "tag": "v1.1.0-rc.5",
       "license": "Apache-2.0"
     },

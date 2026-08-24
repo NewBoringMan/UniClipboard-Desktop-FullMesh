@@ -465,17 +465,17 @@ mod tests {
         }
     }
 
-    fn sample_header() -> ClipboardHeader {
+    fn sample_header_for(origin_device_id: &str) -> ClipboardHeader {
         ClipboardHeader {
             version: ClipboardHeader::CURRENT_VERSION,
             snapshot_hash: "9".repeat(64),
             captured_at_ms: 1_700_000_000_000,
-            origin_device_id: "sender-001".to_string(),
+            origin_device_id: origin_device_id.to_string(),
             origin_device_name: "Alice".to_string(),
             payload_version: 3,
             flow_id: None,
             event: Some(uc_core::clipboard::ClipboardEventEnvelope::new(
-                DeviceId::new("sender-001"),
+                DeviceId::new(origin_device_id),
                 1_700_000_000_000,
                 "9".repeat(64),
                 vec![uc_core::clipboard::ClipboardMimeRepresentation {
@@ -486,6 +486,10 @@ mod tests {
                 vec![],
             )),
         }
+    }
+
+    fn sample_header() -> ClipboardHeader {
+        sample_header_for("sender-001")
     }
 
     /// Spin up a receiver router around a fresh adapter and return the
@@ -567,11 +571,13 @@ mod tests {
 
         let payload = Bytes::from(vec![0xAB; 128]);
         let expected_payload = payload.clone();
+        let expected_header = sample_header();
+        let dispatch_header = expected_header.clone();
         let mut dispatch_task = tokio::spawn(async move {
             dispatch
                 .dispatch(
                     &DeviceId::new("receiver-b"),
-                    &sample_header(),
+                    &dispatch_header,
                     SyncPayload {
                         ciphertext: expected_payload,
                     },
@@ -588,7 +594,7 @@ mod tests {
             .expect("subscriber sees the frame");
 
         assert_eq!(inbound.peer_device_id.as_str(), "sender-a");
-        assert_eq!(inbound.header, sample_header());
+        assert_eq!(inbound.header, expected_header);
         assert_eq!(inbound.ciphertext, payload);
 
         assert!(
@@ -844,8 +850,7 @@ mod tests {
                     presence_mock(),
                 );
 
-                let mut header = sample_header();
-                header.origin_device_id = format!("sender-{i}");
+                let header = sample_header_for(&format!("sender-{i}"));
                 let payload = Bytes::from(vec![i as u8; 32]);
                 let ack = dispatch
                     .dispatch(
