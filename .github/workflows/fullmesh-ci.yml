@@ -310,14 +310,7 @@ jobs:
           script: |
             adb install -r mobile/android/app/build/outputs/apk/release/app-x86_64-release.apk
             adb shell monkey -p app.uniclipboard.android 1
-            for attempt in $(seq 1 30); do
-              adb shell pidof app.uniclipboard.android && break
-              if [ "$attempt" -eq 30 ]; then
-                adb shell dumpsys activity activities
-                exit 1
-              fi
-              sleep 1
-            done
+            for attempt in $(seq 1 30); do pid="$(adb shell pidof app.uniclipboard.android | tr -d '\r')"; if [ -n "$pid" ]; then echo "UniClipboard Android process: $pid"; break; fi; if [ "$attempt" -eq 30 ]; then adb shell dumpsys activity activities; exit 1; fi; sleep 1; done
             adb uninstall app.uniclipboard.android
       - uses: actions/upload-artifact@v7
         with:

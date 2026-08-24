@@ -34,6 +34,7 @@ for (const gate of [
   'scripts/verify-android-release.sh',
   'npm test -- --runInBand',
   'android-emulator-runner',
+  'for attempt in $(seq 1 30); do pid=',
   'prepare-local-unified-engine-core.sh engine',
   "destination 'generic/platform=iOS Simulator'",
   "destination 'generic/platform=iOS'",
