@@ -87,7 +87,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsecret-1-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsecret-1-dev xvfb dbus-x11 rpm
       - run: bun install --frozen-lockfile
         working-directory: desktop
       - run: bun run lint
@@ -103,6 +103,45 @@ jobs:
           else
             bun run tauri build ${{ matrix.args }}
           fi
+      - name: Test Linux deb install, launch and clean uninstall
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: desktop
+        run: |
+          deb="$(find target -path '*/release/bundle/deb/*.deb' -type f -print -quit)"
+          test -n "$deb"
+          package="$(dpkg-deb -f "$deb" Package)"
+          sudo dpkg -i "$deb" || sudo apt-get install -f -y
+          binary="$(dpkg -L "$package" | awk '/\/usr\/bin\// { print; exit }')"
+          test -x "$binary"
+          dbus-run-session -- xvfb-run -a "$binary" >"$RUNNER_TEMP/uniclipboard-linux.log" 2>&1 &
+          pid=$!
+          sleep 8
+          kill -0 "$pid"
+          kill "$pid"
+          wait "$pid" || true
+          sudo dpkg -r "$package"
+          sudo dpkg --purge "$package" || true
+      - name: Verify and launch the macOS testing app
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: desktop
+        run: |
+          app="$(find target -path '*/release/bundle/macos/*.app' -type d -print -quit)"
+          dmg="$(find target -path '*/release/bundle/dmg/*.dmg' -type f -print -quit)"
+          test -n "$app" && test -n "$dmg"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict "$app"
+          rm -f "$dmg"
+          hdiutil create -volname 'UniClipboard Testing' -srcfolder "$app" -ov -format UDZO "$dmg"
+          hdiutil verify "$dmg"
+          binary="$(find "$app/Contents/MacOS" -type f -perm -111 -print -quit)"
+          "$binary" >"$RUNNER_TEMP/uniclipboard-macos.log" 2>&1 &
+          pid=$!
+          sleep 8
+          kill -0 "$pid"
+          kill "$pid"
+          wait "$pid" || true
       - name: Package Windows portable archive
         if: runner.os == 'Windows'
         shell: pwsh
@@ -245,6 +284,21 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath mobile/ios/build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+      - name: Install, launch and uninstall on iOS Simulator
+        shell: bash
+        run: |
+          device="$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          print(next(item["udid"] for group in devices.values() for item in group if "iPhone" in item["name"]))
+          ')"
+          app='mobile/ios/build/Build/Products/Release-iphonesimulator/UniClip.app'
+          xcrun simctl boot "$device" || true
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" "$app"
+          xcrun simctl launch "$device" app.uniclipboard.UniClipboard
+          xcrun simctl terminate "$device" app.uniclipboard.UniClipboard
+          xcrun simctl uninstall "$device" app.uniclipboard.UniClipboard
       - name: Package Simulator app and Engine XCFramework
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
