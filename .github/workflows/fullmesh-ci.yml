@@ -286,12 +286,25 @@ jobs:
           cp android/app/build/outputs/bundle/release/app-release.aab release/UniClipboard-FullMesh-0.1.0-alpha.1-android-universal-test-signed.aab
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          # API 35 repeatedly loses the ADB service during the runner's
+          # post-boot unlock when GitHub's hosted runner has no KVM. API 30
+          # still exceeds the app's minSdk and is stable under x86_64 software
+          # emulation, while the release package itself is independently
+          # checked above for targetSdk 36.
+          api-level: 30
           arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -accel off
           script: |
             adb install -r mobile/android/app/build/outputs/apk/release/app-x86_64-release.apk
             adb shell monkey -p app.uniclipboard.android 1
-            adb shell pidof app.uniclipboard.android
+            for attempt in $(seq 1 30); do
+              adb shell pidof app.uniclipboard.android && break
+              if [ "$attempt" -eq 30 ]; then
+                adb shell dumpsys activity activities
+                exit 1
+              fi
+              sleep 1
+            done
             adb uninstall app.uniclipboard.android
       - uses: actions/upload-artifact@v7
         with:
