@@ -3,7 +3,7 @@ name: FullMesh CI and package matrix
 on:
   pull_request:
   push:
-    branches: [main, fullmesh-ci, fullmesh-ci-v7]
+    branches: [main, fullmesh-ci]
   workflow_dispatch:
 
 permissions:
@@ -367,11 +367,23 @@ jobs:
           xcrun simctl launch "$device" app.uniclipboard.UniClipboard
           xcrun simctl terminate "$device" app.uniclipboard.UniClipboard
           xcrun simctl uninstall "$device" app.uniclipboard.UniClipboard
-      - name: Package Simulator app and Engine XCFramework
+      - name: Build unsigned device archive
+        run: |
+          xcodebuild archive \
+            -workspace mobile/ios/UniClip.xcworkspace \
+            -scheme UniClip \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath mobile/ios/build/UniClip-0.1.0-alpha.1-ios-device-unsigned-testing.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+      - name: Package Simulator app, unsigned device archive and Engine XCFramework
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
             mobile/ios/build/Build/Products/Release-iphonesimulator/UniClip.app \
             mobile/ios/UniClip-0.1.0-alpha.1-ios-simulator-unsigned-testing.zip
+          ditto -c -k --sequesterRsrc --keepParent \
+            mobile/ios/build/UniClip-0.1.0-alpha.1-ios-device-unsigned-testing.xcarchive \
+            mobile/ios/UniClip-0.1.0-alpha.1-ios-device-unsigned-testing.xcarchive.zip
           ditto -c -k --sequesterRsrc --keepParent \
             mobile/modules/uc-engine/ios/UniClipboardEngine.xcframework \
             mobile/ios/UniClipboardEngine-1.1.0-rc.6-fullmesh.1-xcframework.zip
@@ -380,6 +392,7 @@ jobs:
           name: ios-simulator-build
           path: |
             mobile/ios/UniClip-0.1.0-alpha.1-ios-simulator-unsigned-testing.zip
+            mobile/ios/UniClip-0.1.0-alpha.1-ios-device-unsigned-testing.xcarchive.zip
             mobile/ios/UniClipboardEngine-1.1.0-rc.6-fullmesh.1-xcframework.zip
             mobile/modules/uc-engine/ios/Bindings/uc_engine_uniffi.swift
           if-no-files-found: error
