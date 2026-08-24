@@ -69,18 +69,16 @@ $certificate = New-SelfSignedCertificate `
 $password = ConvertTo-SecureString ([Guid]::NewGuid().ToString('N')) -AsPlainText -Force
 $pfx = Join-Path $env:RUNNER_TEMP "uniclipboard-msix-$Architecture.pfx"
 $certificatePath = Join-Path $OutputDir "UniClipboard_${Version}_${Architecture}-testing.cer"
-$rootInstalled = $false
+$trustedCertificate = $null
 try {
   Export-PfxCertificate -Cert $certificate -FilePath $pfx -Password $password | Out-Null
   Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
-  # signtool /pa performs a full chain validation. The ephemeral self-signed
-  # test certificate is its own root. Import-Certificate may display an
-  # interactive root-trust confirmation on a hosted runner, so use certutil's
-  # explicit force/non-interactive path and remove the root in finally. End
-  # users still import the public certificate into TrustedPeople for sideloading.
-  & certutil.exe -user -f -silent -addstore Root $certificatePath
-  if ($LASTEXITCODE -ne 0) { throw "certutil root import failed with exit code $LASTEXITCODE" }
-  $rootInstalled = $true
+  # A test package leaf certificate belongs in TrustedPeople, never Root.
+  # LocalMachine matches Windows' MSIX trust lookup and avoids the interactive
+  # root-CA warning that can block an unattended hosted runner.
+  $trustedCertificate = Import-Certificate `
+    -FilePath $certificatePath `
+    -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
   & $signtool sign /fd SHA256 /f $pfx /p ([System.Net.NetworkCredential]::new('', $password).Password) $artifact
   if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
   & $signtool verify /pa /v $artifact
@@ -88,8 +86,10 @@ try {
 } finally {
   Remove-Item $pfx -Force -ErrorAction SilentlyContinue
   Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
-  if ($rootInstalled) {
-    & certutil.exe -user -f -silent -delstore Root $certificate.Thumbprint | Out-Null
+  if ($trustedCertificate) {
+    Remove-Item "Cert:\LocalMachine\TrustedPeople\$($trustedCertificate.Thumbprint)" `
+      -Force `
+      -ErrorAction SilentlyContinue
   }
 }
 

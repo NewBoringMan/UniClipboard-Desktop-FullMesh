@@ -15,7 +15,7 @@ $installedPackage = $null
 try {
   $trustedCertificate = Import-Certificate `
     -FilePath $certificateFile `
-    -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople'
+    -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople'
 
   Add-AppxPackage -Path $packageFile -ForceApplicationShutdown
   $installedPackage = Get-AppxPackage -Name 'UniClipboard.FullMesh' |
@@ -55,7 +55,7 @@ try {
   }
 
   if ($trustedCertificate) {
-    Remove-Item "Cert:\CurrentUser\TrustedPeople\$($trustedCertificate.Thumbprint)" `
+    Remove-Item "Cert:\LocalMachine\TrustedPeople\$($trustedCertificate.Thumbprint)" `
       -Force `
       -ErrorAction SilentlyContinue
   }
