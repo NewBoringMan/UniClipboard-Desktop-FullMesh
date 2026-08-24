@@ -24,11 +24,11 @@ fi
 "$gradle_command" "${gradle_args[@]}" :app:clean bundleRelease -PucUniversalOnly
 cp "$android_dir/app/build/outputs/bundle/release/app-release.aab" "$staging_dir/app-release.aab"
 
-"$gradle_command" "${gradle_args[@]}" assembleRelease -PucUniversalOnly
+"$gradle_command" "${gradle_args[@]}" :app:assembleRelease -PucUniversalOnly
 cp "$android_dir/app/build/outputs/apk/release/app-release.apk" \
   "$staging_dir/app-universal-release.apk"
 
-"$gradle_command" "${gradle_args[@]}" :app:clean assembleRelease
+"$gradle_command" "${gradle_args[@]}" :app:clean :app:assembleRelease
 
 apk_dir="$android_dir/app/build/outputs/apk/release"
 bundle_dir="$android_dir/app/build/outputs/bundle/release"

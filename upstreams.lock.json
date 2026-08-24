@@ -30,9 +30,9 @@
       "sourceRepository": "https://github.com/UniClipboard/UniClip.git",
       "branch": "main",
       "upstreamCommit": "8bc87851e7d587c04726d209a92547ce7913fb7e",
-      "sourceCommit": "cae70496bfbdfd96d8f91736dbb16f4ed11a70b0",
-      "commit": "226664ef8284f760b3cb52ef7240bce7f6341912",
-      "tree": "a1475c702890fd4f4266a04b6bff80f14b4a07ca",
+      "sourceCommit": "edbd71130014575bf1abadd99fa4181b5d668da4",
+      "commit": "3486746b038d98e8218a09bb99064e8a82d4d7ab",
+      "tree": "f3216321474913b012cd83121dfc02d3add2b0f2",
       "tag": "v2.0.0.179-alpha.3",
       "stableTag": "v1.3.0.165",
       "license": "MIT"
