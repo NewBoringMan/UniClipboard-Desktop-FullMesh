@@ -82,8 +82,11 @@ jobs:
         run: tar -C dist -czf UniClipboard-FullMesh-0.1.0-alpha.1-delivery.tar.gz 0.1.0-alpha.1
       - uses: actions/upload-artifact@v7
         with:
-          name: fullmesh-delivery-0.1.0-alpha.1
+          name: fullmesh-metadata-0.1.0-alpha.1
           path: |
-            dist/0.1.0-alpha.1/**
-            UniClipboard-FullMesh-0.1.0-alpha.1-delivery.tar.gz
+            dist/0.1.0-alpha.1/sbom/**
+            dist/0.1.0-alpha.1/checksums/**
+            dist/0.1.0-alpha.1/test-reports/**
+            dist/0.1.0-alpha.1/manifest.json
+            dist/0.1.0-alpha.1/harmonyos/HARMONYOS_STATUS.md
           if-no-files-found: error
