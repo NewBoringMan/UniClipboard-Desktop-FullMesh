@@ -33,6 +33,25 @@ async function filesUnder(directory) {
   return found;
 }
 
+function isDeliveryArtifact(path) {
+  const lower = path.toLowerCase();
+  const name = basename(path).toLowerCase();
+  if (
+    /\.(aar|aab|apk|appimage|cer|deb|dmg|exe|ipa|msi|msix|pkg|pom|rpm|swift|tar|tgz|zip)$/.test(
+      name,
+    )
+  ) {
+    return true;
+  }
+  return (
+    lower.includes('provenance') ||
+    lower.includes('sha256sums') ||
+    lower.includes('source-commit') ||
+    lower.includes('runtime-dependencies') ||
+    lower.includes('version.txt')
+  );
+}
+
 function destinationFor(path) {
   const rel = relative(input, path).split(sep).join('/');
   const lower = rel.toLowerCase();
@@ -54,7 +73,7 @@ function destinationFor(path) {
 const used = new Set();
 let count = 0;
 await Promise.all(deliveryDirectories.map((directory) => mkdir(join(output, directory), { recursive: true })));
-for (const path of await filesUnder(input)) {
+for (const path of (await filesUnder(input)).filter(isDeliveryArtifact)) {
   const platform = destinationFor(path);
   let filename = basename(path);
   const key = `${platform}/${filename}`.toLowerCase();

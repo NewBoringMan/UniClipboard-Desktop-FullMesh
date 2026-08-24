@@ -64,6 +64,8 @@ const assembler = await read('packaging/assemble-release.mjs');
 for (const path of requiredDeliveryPaths) {
   assert.ok(assembler.includes(`'${path}'`), `assembler does not classify ${path}`);
 }
+const stager = await read('packaging/stage-ci-artifacts.mjs');
+assert.ok(stager.includes('isDeliveryArtifact'), 'CI staging must exclude unpacked app internals');
 
 for (const path of [
   'docs/verification/REQUIREMENTS_MATRIX.md',
