@@ -166,8 +166,8 @@ describe('validated release workflow', () => {
     expect(androidBuildWorkflow).toContain('build-android-release.sh');
     expect(androidBuildWorkflow).toContain('verify-android-release.sh');
     expect(androidReleaseBuildScript).toContain('bundleRelease -PucUniversalOnly');
-    expect(androidReleaseBuildScript).toContain('assembleRelease -PucUniversalOnly');
-    expect(androidReleaseBuildScript).toContain(':app:clean assembleRelease');
+    expect(androidReleaseBuildScript).toContain(':app:assembleRelease -PucUniversalOnly');
+    expect(androidReleaseBuildScript).toContain(':app:clean :app:assembleRelease');
     expect(androidReleaseBuildScript).toContain(':react-native-reanimated:prefabReleasePackage');
     expect(androidReleaseVerifyScript).toContain("'arm64-v8a,armeabi-v7a,x86_64'");
     expect(androidReleaseVerifyScript).toContain('apksigner');

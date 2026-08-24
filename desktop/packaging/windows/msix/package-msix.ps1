@@ -73,7 +73,11 @@ $trusted = $null
 try {
   Export-PfxCertificate -Cert $certificate -FilePath $pfx -Password $password | Out-Null
   Export-Certificate -Cert $certificate -FilePath $certificatePath | Out-Null
-  $trusted = Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople'
+  # signtool /pa performs a full chain validation. The ephemeral self-signed
+  # test certificate is its own root, so trust it only for this verification
+  # window and remove it in finally. End users still import the exported public
+  # certificate into TrustedPeople for sideloading.
+  $trusted = Import-Certificate -FilePath $certificatePath -CertStoreLocation 'Cert:\CurrentUser\Root'
   & $signtool sign /fd SHA256 /f $pfx /p ([System.Net.NetworkCredential]::new('', $password).Password) $artifact
   if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
   & $signtool verify /pa /v $artifact
@@ -82,7 +86,7 @@ try {
   Remove-Item $pfx -Force -ErrorAction SilentlyContinue
   Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
   if ($trusted) {
-    Remove-Item "Cert:\CurrentUser\TrustedPeople\$($trusted.Thumbprint)" -Force -ErrorAction SilentlyContinue
+    Remove-Item "Cert:\CurrentUser\Root\$($trusted.Thumbprint)" -Force -ErrorAction SilentlyContinue
   }
 }
 

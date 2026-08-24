@@ -32,11 +32,17 @@ for (const gate of [
   'cargo test --workspace --locked',
   'scripts/build-android-release.sh',
   'scripts/verify-android-release.sh',
+  'npm test -- --runInBand',
   'android-emulator-runner',
   'prepare-local-unified-engine-core.sh engine',
   "destination 'generic/platform=iOS Simulator'",
   'linux/amd64,linux/arm64',
   'test-msix-lifecycle.ps1',
+  'createUpdaterArtifacts":false',
+  'unsigned-testing-portable.zip',
+  'ad-hoc-testing.app.zip',
+  'android-universal-test-signed.aab',
+  'relay-amd64-arm64-unsigned-testing.oci.tar',
 ]) {
   assert.ok(workflow.includes(gate), `missing CI gate ${gate}`);
 }
@@ -59,6 +65,8 @@ const assembler = await read('packaging/assemble-release.mjs');
 for (const path of requiredDeliveryPaths) {
   assert.ok(assembler.includes(`'${path}'`), `assembler does not classify ${path}`);
 }
+const stager = await read('packaging/stage-ci-artifacts.mjs');
+assert.ok(stager.includes('isDeliveryArtifact'), 'CI staging must exclude unpacked app internals');
 
 for (const path of [
   'docs/verification/REQUIREMENTS_MATRIX.md',

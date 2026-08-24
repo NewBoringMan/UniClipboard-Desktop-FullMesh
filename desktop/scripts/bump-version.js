@@ -83,7 +83,10 @@ export function updateCargoToml(
   relativePath = path.join('src-tauri', 'Cargo.toml'),
   section = 'package'
 ) {
-  const cargoPath = path.join(process.cwd(), relativePath)
+  // `path.relative()` returns an absolute path when the source and target are
+  // on different Windows drive letters. `resolve` preserves that absolute
+  // input while still anchoring ordinary relative manifest paths at cwd.
+  const cargoPath = path.resolve(process.cwd(), relativePath)
   const content = fs.readFileSync(cargoPath, 'utf8')
   const lines = content.split('\n')
   let currentSection = null
