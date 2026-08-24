@@ -105,9 +105,9 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            bun run tauri build ${{ matrix.args }} --bundles nsis,msi
+            bun run tauri build ${{ matrix.args }} --bundles nsis,msi --config '{"bundle":{"createUpdaterArtifacts":false}}'
           else
-            bun run tauri build ${{ matrix.args }}
+            bun run tauri build ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
           fi
       - name: Test Linux deb install, launch and clean uninstall
         if: runner.os == 'Linux'
