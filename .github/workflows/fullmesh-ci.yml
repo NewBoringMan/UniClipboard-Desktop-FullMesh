@@ -110,7 +110,7 @@ jobs:
             # alpha.1 as the equivalent numeric prerelease internally.
             bun run tauri build ${{ matrix.args }} --bundles nsis,msi --config '{"version":"0.1.0-1","bundle":{"createUpdaterArtifacts":false}}'
           else
-            bun run tauri build ${{ matrix.args }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
+            bun run tauri build ${{ matrix.args }} --config '{"version":"0.1.0-alpha.1","bundle":{"createUpdaterArtifacts":false}}'
           fi
       - name: Label Linux packages as unsigned testing artifacts
         if: runner.os == 'Linux'
@@ -154,8 +154,21 @@ jobs:
           kill -0 "$pid"
           kill "$pid"
           wait "$pid" || true
+          pkill -TERM -x uniclipboard || true
+          pkill -TERM -x uniclipd || true
+          for attempt in $(seq 1 20); do
+            if ! pgrep -x uniclipboard >/dev/null && ! pgrep -x uniclipd >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 20 ]; then
+              echo 'UniClipboard processes did not stop before package removal' >&2
+              exit 1
+            fi
+            sleep 1
+          done
           sudo dpkg -r "$package"
           sudo dpkg --purge "$package" || true
+          test ! -e "$binary"
       - name: Verify and launch the macOS testing app
         if: runner.os == 'macOS'
         shell: bash
