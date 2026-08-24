@@ -1,0 +1,54 @@
+name: uniclipboard-fullmesh-relay-dev
+services:
+  iroh-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile.iroh-relay
+    command: ["--config-path=/etc/iroh-relay/config.toml", "--dev"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "3340:3340/tcp"
+      - "9090:9090/tcp"
+    volumes:
+      - ./config/iroh-relay.dev.toml:/etc/iroh-relay/config.toml:ro
+    restart: unless-stopped
+
+  mailbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      MAILBOX_AUTH_FILE: /run/secrets/mailbox_auth
+      MAX_PAYLOAD_BYTES: "10485760"
+      MAX_MAILBOX_BYTES: "52428800"
+      MAX_MESSAGES_PER_MAILBOX: "100"
+      MIN_TTL_SECONDS: "30"
+      MAX_TTL_SECONDS: "86400"
+      RATE_PER_MINUTE: "120"
+      RATE_BURST: "30"
+    ports:
+      - "8787:8787/tcp"
+    secrets:
+      - mailbox_auth
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    volumes:
+      - mailbox-data:/var/lib/uniclipboard-mailbox
+    restart: unless-stopped
+
+secrets:
+  mailbox_auth:
+    file: ./config/auth.json
+
+volumes:
+  mailbox-data:
+

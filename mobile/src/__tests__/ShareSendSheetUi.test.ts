@@ -1,0 +1,91 @@
+import fs from 'fs';
+import path from 'path';
+
+const read = (file: string) =>
+  fs.readFileSync(path.resolve(__dirname, '../components/ShareSendSheet', file), 'utf8');
+
+const ios = read('ShareSendSheet.ios.tsx');
+const android = read('ShareSendSheet.android.tsx');
+
+describe('ShareSendSheet presentation', () => {
+  it('opens the iOS sheet at full height by default', () => {
+    expect(ios).toContain("presentationDetents(['large'])");
+    expect(ios).not.toContain('fitToContents');
+  });
+
+  it('uses one sheet background behind the header, content, and footer on iOS', () => {
+    expect(ios).toContain(
+      "const SHEET_BACKGROUND = iosColors?.systemGroupedBackground ?? '#F2F2F7';"
+    );
+    expect(ios).toContain('background(SHEET_BACKGROUND)');
+  });
+
+  it('puts the shared-content section before device selection on both platforms', () => {
+    expect(ios.indexOf('<ContentSection')).toBeLessThan(ios.indexOf('<DeviceSection'));
+    expect(android.indexOf('<ContentSection')).toBeLessThan(android.indexOf('<DeviceSection'));
+  });
+
+  it('uses a compact preview and a clear bottom send action on iOS', () => {
+    expect(ios).toContain('const IMAGE_PREVIEW_SIZE = 64;');
+    expect(ios).toContain('resizable()');
+    expect(ios).toContain("aspectRatio({ contentMode: 'fit' })");
+    expect(ios).toContain('clipped()');
+    expect(ios).toContain('<SendFooter c={c} />');
+    expect(ios).not.toContain('function HeaderSendButton');
+  });
+
+  it('shows a filled success button while the iOS sheet is closing after a send', () => {
+    const footer = ios.match(/function SendFooter[\s\S]*?\n}\n\nfunction ContentSection/)?.[0];
+
+    expect(footer).toContain("t('send.success')");
+    expect(footer).toContain('iosSaturatedButtonPalette(iosKindTints.image)');
+    expect(footer).toContain('checkmark.circle.fill');
+    expect(footer).not.toContain("t('send.done')");
+  });
+
+  it('anchors iOS device information left and the selection control right', () => {
+    expect(ios).toContain('listRowInsets({ top: 8, bottom: 8, leading: 16, trailing: 16 })');
+    const deviceRow = ios.match(/function DeviceRow[\s\S]*?\n}\n\nconst styles/)?.[0];
+
+    expect(deviceRow).toContain('<Spacer />');
+    expect(deviceRow?.indexOf('<Spacer />')).toBeLessThan(
+      deviceRow?.indexOf('checkmark.circle.fill')
+    );
+  });
+
+  it('gives Android selected device rows full-row feedback and selection semantics', () => {
+    expect(android).toContain('accessibilityState={{ selected }}');
+    expect(android).toContain('selected && styles.deviceRowSelected');
+  });
+
+  it('keeps Android share sheet content in the React Native view tree', () => {
+    expect(android).not.toContain('AppCard');
+    expect(android).not.toContain('AppProgressIndicator');
+    expect(android).not.toContain('AppButton');
+  });
+
+  it('uses a full-screen Android share page that stays visible while parsing', () => {
+    expect(android).toContain('<Modal');
+    expect(android).toContain('isParsing');
+    expect(android).not.toContain('AppBottomSheet');
+  });
+
+  it('uses the native full-row hit shape for iOS device selection', () => {
+    expect(ios).toContain('contentShape(shapes.rectangle())');
+    expect(ios).toContain('accessibilityValue(selected ?');
+  });
+
+  it('shows share recipients by name without connection status on both platforms', () => {
+    const iosDeviceRow = ios.match(/function DeviceRow[\s\S]*?\n}\n\nconst styles/)?.[0];
+    const androidDeviceRow = android.match(/function DeviceRow[\s\S]*?\n}\n\nconst styles/)?.[0];
+
+    expect(iosDeviceRow).toContain('device.displayName');
+    expect(androidDeviceRow).toContain('device.displayName');
+    expect(iosDeviceRow).not.toContain('space.devices.online');
+    expect(iosDeviceRow).not.toContain('space.devices.offline');
+    expect(androidDeviceRow).not.toContain('space.devices.online');
+    expect(androidDeviceRow).not.toContain('space.devices.offline');
+    expect(iosDeviceRow).not.toContain('Image systemName="circle.fill" size={9}');
+    expect(androidDeviceRow).not.toContain('styles.statusDot');
+  });
+});

@@ -1,0 +1,238 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLegacyHistory, getPayloadFileUri, migrateLegacyContainer } from 'app-group-store';
+import { HistoryStorage } from '../features/history';
+import { HistorySyncStatus } from '../types/clipboard';
+import { STORAGE_KEYS } from '../types/storage';
+
+jest.mock('react-native', () => {
+  const actual = jest.requireActual('react-native');
+  const next = Object.create(actual);
+  Object.defineProperty(next, 'Platform', {
+    value: {
+      ...actual.Platform,
+      OS: 'ios',
+    },
+  });
+  return next;
+});
+
+jest.mock('app-group-store', () => ({
+  getLegacyHistory: jest.fn().mockResolvedValue(null),
+  getPayloadFileUri: jest.fn().mockResolvedValue(null),
+  migrateLegacyContainer: jest.fn().mockResolvedValue({ migrated: false, keys: 0 }),
+}));
+
+jest.mock('expo-file-system', () => ({
+  Paths: { document: 'file:///documents', cache: 'file:///cache' },
+  File: jest.fn().mockImplementation((pathOrDir: unknown, name?: string) => ({
+    exists: false,
+    uri: name ? `file://test/${name}` : String(pathOrDir),
+    move: jest.fn(),
+    write: jest.fn(),
+    delete: jest.fn(),
+    info: jest.fn(() => ({ size: 0 })),
+  })),
+  Directory: jest.fn().mockImplementation(() => ({
+    exists: true,
+    create: jest.fn(),
+    delete: jest.fn(),
+    list: jest.fn(() => []),
+    uri: 'file://test/history',
+  })),
+}));
+
+jest.mock('../features/settings', () => ({
+  configStorage: {
+    getConfig: jest.fn().mockResolvedValue({ maxHistoryItems: 1000 }),
+  },
+}));
+
+jest.mock('../support/observability', () => ({
+  createLogger: () => ({
+    error: jest.fn(),
+    warn: jest.fn(),
+    info: jest.fn(),
+    debug: jest.fn(),
+  }),
+}));
+
+const mockGetItem = AsyncStorage.getItem as jest.Mock;
+const mockSetItem = AsyncStorage.setItem as jest.Mock;
+const mockGetLegacyHistory = getLegacyHistory as jest.Mock;
+const mockGetPayloadFileUri = getPayloadFileUri as jest.Mock;
+const mockMigrateLegacyContainer = migrateLegacyContainer as jest.Mock;
+const APP_GROUP_HISTORY_IMPORT_KEY = '@syncclipboard:history:appgroup-imported';
+const APP_GROUP_PAYLOAD_REPAIR_KEY = '@syncclipboard:history:appgroup-payload-uris-repaired:v1';
+
+describe('App Group history import', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (HistoryStorage as unknown as { instance: null }).instance = null;
+    mockGetItem.mockResolvedValue(null);
+    mockSetItem.mockResolvedValue(undefined);
+    mockGetLegacyHistory.mockResolvedValue(null);
+    mockGetPayloadFileUri.mockResolvedValue(null);
+    mockMigrateLegacyContainer.mockResolvedValue({ migrated: false, keys: 0 });
+  });
+
+  it('imports native App Group history when RN history is empty', async () => {
+    mockGetLegacyHistory.mockResolvedValue(
+      JSON.stringify([
+        {
+          id: '4A482F3A-585D-4FAD-AF4D-7E5C7E979DAA',
+          entry: {
+            type: 'Image',
+            hash: 'ABCDEF',
+            text: 'image.png',
+            hasData: true,
+            dataName: 'image.png',
+            size: 42,
+          },
+          timestamp: 785548800,
+          direction: 'pulled',
+        },
+        {
+          id: '8604E01F-7555-4872-B315-44022A252327',
+          entry: {
+            type: 'Text',
+            hash: 'TEXT01',
+            text: 'hello',
+            hasData: false,
+            size: 5,
+          },
+          timestamp: 1700000100000,
+          direction: 'local',
+        },
+      ])
+    );
+    mockGetPayloadFileUri.mockImplementation((profileId: string) =>
+      profileId === 'Image-ABCDEF' ? Promise.resolve('file:///group/payloads/Image-ABCDEF') : null
+    );
+
+    const storage = HistoryStorage.getInstance();
+    await storage.initialize();
+
+    expect(mockMigrateLegacyContainer).not.toHaveBeenCalled();
+
+    await storage.runStartupMaintenance();
+
+    expect(mockMigrateLegacyContainer).toHaveBeenCalled();
+    const items = await storage.getAllItems();
+    expect(items).toHaveLength(2);
+    expect(items.find((item) => item.profileHash === 'TEXT01')).toEqual(
+      expect.objectContaining({
+        type: 'Text',
+        profileHash: 'TEXT01',
+        text: 'hello',
+        syncStatus: HistorySyncStatus.LocalOnly,
+        isLocalFileReady: true,
+      })
+    );
+    expect(items.find((item) => item.profileHash === 'ABCDEF')).toEqual(
+      expect.objectContaining({
+        type: 'Image',
+        profileHash: 'ABCDEF',
+        dataName: 'image.png',
+        hasData: true,
+        hasRemoteData: true,
+        fileUri: 'file:///group/payloads/Image-ABCDEF',
+        syncStatus: HistorySyncStatus.Synced,
+        from: 'server',
+        isLocalFileReady: true,
+      })
+    );
+  });
+
+  it('re-merges the legacy log idempotently and never resurrects deleted items', async () => {
+    const legacyJson = JSON.stringify([
+      {
+        id: '8604E01F-7555-4872-B315-44022A252327',
+        entry: { type: 'Text', hash: 'TEXT01', text: 'hello', hasData: false, size: 5 },
+        timestamp: 1700000100000,
+        direction: 'local',
+      },
+    ]);
+    mockGetLegacyHistory.mockResolvedValue(legacyJson);
+
+    const storage = HistoryStorage.getInstance();
+    await storage.initialize();
+    await storage.runStartupMaintenance();
+    expect(
+      (await storage.getAllItems()).filter((item) => item.profileHash === 'TEXT01')
+    ).toHaveLength(1);
+
+    // 用户在 App 里删除 → tombstone;下次启动的再合并不得复活它
+    await storage.softDeleteItem('TEXT01');
+    (HistoryStorage as unknown as { instance: null }).instance = null;
+    const storage2 = HistoryStorage.getInstance();
+    await storage2.initialize();
+    await storage2.runStartupMaintenance();
+
+    expect(mockGetLegacyHistory).toHaveBeenCalledTimes(2); // 每次启动都合并
+    const items = await storage2.getAllItems();
+    expect(items.find((item) => item.profileHash === 'TEXT01')).toBeUndefined();
+  });
+
+  it('repairs imported image records that were saved before payloads were migrated', async () => {
+    let payloadRepairComplete = false;
+    mockGetItem.mockImplementation((key: string) => {
+      if (key === APP_GROUP_PAYLOAD_REPAIR_KEY) {
+        return Promise.resolve(payloadRepairComplete ? '1' : null);
+      }
+      if (key === APP_GROUP_HISTORY_IMPORT_KEY) return Promise.resolve('1');
+      if (key === STORAGE_KEYS.HISTORY) {
+        return Promise.resolve(
+          JSON.stringify([
+            {
+              type: 'Image',
+              text: 'image.png',
+              profileHash: 'ABCDEF',
+              hasData: true,
+              dataName: 'image.png',
+              size: 42,
+              timestamp: 1700000100000,
+              starred: false,
+              syncStatus: HistorySyncStatus.Synced,
+              version: 0,
+              lastModified: 1700000100000,
+              lastAccessed: 1700000100000,
+              isDeleted: false,
+              pinned: false,
+              isLocalFileReady: false,
+              hasRemoteData: true,
+            },
+          ])
+        );
+      }
+      return Promise.resolve(null);
+    });
+    mockSetItem.mockImplementation(async (key: string) => {
+      if (key === APP_GROUP_PAYLOAD_REPAIR_KEY) payloadRepairComplete = true;
+    });
+    mockGetPayloadFileUri.mockImplementation((profileId: string) =>
+      profileId === 'Image-ABCDEF' ? Promise.resolve('file:///group/payloads/Image-ABCDEF') : null
+    );
+
+    const storage = HistoryStorage.getInstance();
+    await storage.initialize();
+    expect(mockGetPayloadFileUri).not.toHaveBeenCalled();
+
+    await storage.runStartupMaintenance();
+
+    const items = await storage.getAllItems();
+    expect(items[0]).toEqual(
+      expect.objectContaining({
+        fileUri: 'file:///group/payloads/Image-ABCDEF',
+        isLocalFileReady: true,
+      })
+    );
+    expect(mockMigrateLegacyContainer).toHaveBeenCalled();
+
+    (HistoryStorage as unknown as { instance: null }).instance = null;
+    const storage2 = HistoryStorage.getInstance();
+    await storage2.initialize();
+    await storage2.runStartupMaintenance();
+
+    expect(mockGetPayloadFileUri).toHaveBeenCalledTimes(1);
+  });
+});

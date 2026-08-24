@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+TARGET_DIR="${UC_ENGINE_UNIFFI_TARGET_DIR:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}}"
+DIST_ROOT="${UC_ENGINE_UNIFFI_DIST_DIR:-$TARGET_DIR/uc-engine-uniffi-dist}"
+DIST_DIR="$DIST_ROOT/android"
+STAGE_DIR="$TARGET_DIR/uc-engine-uniffi-android-package"
+BINDINGS_DIR="$STAGE_DIR/kotlin"
+JNI_DIR="$STAGE_DIR/jni"
+GRADLE_BUILD_DIR="$STAGE_DIR/gradle-build"
+ANDROID_PROJECT="$REPO_ROOT/bindings/uc-engine-uniffi/android"
+GRADLEW="$REPO_ROOT/tests/hosts/android/gradlew"
+GRADLE_COMMAND="${UC_ENGINE_UNIFFI_GRADLE_COMMAND:-$GRADLEW}"
+AAR_OUT="$DIST_DIR/UniClipboardEngine.aar"
+CHECKSUM_FILE="$DIST_DIR/UniClipboardEngine.checksum.txt"
+DEBUG_DIR="$DIST_ROOT/debug-symbols/android"
+CARGO_LOCKED_FLAG=""
+if [[ -n "${UC_ENGINE_UNIFFI_BUILD_LOCKED:-}" ]]; then
+  CARGO_LOCKED_FLAG="--locked"
+fi
+
+case "$(uname -s)" in
+  Darwin|Linux) HOST_METADATA_LIBRARY="$TARGET_DIR/release/libuc_engine_uniffi.rlib" ;;
+  *) echo "Android packaging requires a macOS or Linux host" >&2; exit 1 ;;
+esac
+
+export CARGO_TARGET_DIR="$TARGET_DIR"
+# Android cross-compilation has exhibited intermittent missing-rlib failures when
+# Cargo's pipelining is enabled. Keep the release path deterministic while still
+# allowing maintainers to opt back in explicitly for a known-good toolchain.
+export CARGO_BUILD_PIPELINING="${CARGO_BUILD_PIPELINING:-false}"
+cd "$REPO_ROOT"
+if [[ -z "${UC_ENGINE_UNIFFI_PACKAGE_EXISTING:-}" ]]; then
+  rm -rf "$STAGE_DIR" "$DIST_DIR" "$DEBUG_DIR"
+  mkdir -p "$BINDINGS_DIR" "$JNI_DIR" "$DIST_DIR" "$DEBUG_DIR"
+
+  echo "==> Generate Kotlin bindings from the host library"
+  cargo build -p uc-engine-uniffi --release $CARGO_LOCKED_FLAG
+  cargo run -p uc-engine-uniffi --release --features bindgen-cli \
+    --bin uc-engine-uniffi-bindgen $CARGO_LOCKED_FLAG -- \
+    generate "$HOST_METADATA_LIBRARY" --language kotlin \
+    --out-dir "$BINDINGS_DIR" --no-format
+
+  echo "==> Build Android native libraries"
+  cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 \
+    build -p uc-engine-uniffi --release $CARGO_LOCKED_FLAG
+  mkdir -p "$JNI_DIR/armeabi-v7a" "$JNI_DIR/arm64-v8a" "$JNI_DIR/x86_64"
+  cp "$TARGET_DIR/armv7-linux-androideabi/release/libuc_engine_uniffi.so" \
+    "$JNI_DIR/armeabi-v7a/"
+  cp "$TARGET_DIR/aarch64-linux-android/release/libuc_engine_uniffi.so" \
+    "$JNI_DIR/arm64-v8a/"
+  cp "$TARGET_DIR/x86_64-linux-android/release/libuc_engine_uniffi.so" \
+    "$JNI_DIR/x86_64/"
+else
+  echo "==> Reuse verified Kotlin bindings and Android native libraries"
+  test -f "$BINDINGS_DIR/uniffi/uc_engine_uniffi/uc_engine_uniffi.kt"
+  test -f "$JNI_DIR/armeabi-v7a/libuc_engine_uniffi.so"
+  test -f "$JNI_DIR/arm64-v8a/libuc_engine_uniffi.so"
+  test -f "$JNI_DIR/x86_64/libuc_engine_uniffi.so"
+  rm -rf "$DIST_DIR" "$DEBUG_DIR"
+  mkdir -p "$DIST_DIR" "$DEBUG_DIR"
+fi
+cp "$JNI_DIR/armeabi-v7a/libuc_engine_uniffi.so" "$DEBUG_DIR/armeabi-v7a.so"
+cp "$JNI_DIR/arm64-v8a/libuc_engine_uniffi.so" "$DEBUG_DIR/arm64-v8a.so"
+cp "$JNI_DIR/x86_64/libuc_engine_uniffi.so" "$DEBUG_DIR/x86_64.so"
+
+echo "==> Compile Kotlin bindings and assembleRelease"
+UC_ENGINE_UNIFFI_KOTLIN_DIR="$BINDINGS_DIR" \
+UC_ENGINE_UNIFFI_JNI_DIR="$JNI_DIR" \
+UC_ENGINE_UNIFFI_GRADLE_BUILD_DIR="$GRADLE_BUILD_DIR" \
+  "$GRADLE_COMMAND" --no-daemon -p "$ANDROID_PROJECT" assembleRelease
+
+cp "$GRADLE_BUILD_DIR/outputs/aar/UniClipboardEngine-release.aar" "$AAR_OUT"
+cp "$BINDINGS_DIR/uniffi/uc_engine_uniffi/uc_engine_uniffi.kt" "$DIST_DIR/"
+shasum -a 256 "$AAR_OUT" | awk '{print $1}' > "$CHECKSUM_FILE"
+
+VERSION="$(cargo pkgid -p uc-engine-uniffi)"
+VERSION="${VERSION##*#}"
+COMMIT="$(git rev-parse HEAD)"
+printf 'v%s\n' "$VERSION" > "$DIST_DIR/version.txt"
+printf '%s\n' "$COMMIT" > "$DIST_DIR/source-commit.txt"
+printf '%s\n' \
+  'net.java.dev.jna:jna:5.14.0@aar' \
+  'org.jetbrains.kotlin:kotlin-stdlib:2.1.20' \
+  > "$DIST_DIR/runtime-dependencies.txt"
+cat > "$DIST_DIR/UniClipboardEngine.pom" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>app.uniclipboard</groupId>
+  <artifactId>uniclipboard-engine</artifactId>
+  <version>$VERSION</version>
+  <packaging>aar</packaging>
+  <dependencies>
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna</artifactId>
+      <version>5.14.0</version>
+      <type>aar</type>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+      <version>2.1.20</version>
+      <scope>runtime</scope>
+    </dependency>
+  </dependencies>
+</project>
+EOF
+
+echo "OK: $AAR_OUT"
+echo "OK: $CHECKSUM_FILE"

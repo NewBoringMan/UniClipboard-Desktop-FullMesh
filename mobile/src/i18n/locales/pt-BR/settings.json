@@ -1,0 +1,95 @@
+{
+  "appearance": {
+    "sectionTitle": "Aparência",
+    "mode": {
+      "label": "Modo de aparência",
+      "system": "Seguir o sistema",
+      "light": "Claro",
+      "dark": "Escuro"
+    },
+    "hideFromRecents": {
+      "title": "Ocultar das tarefas recentes",
+      "desc": "Bloqueie antes de ocultar para evitar que seja limpo com um toque"
+    },
+    "modeChangeFailed": "Não foi possível alterar o modo de aparência",
+    "updateFailed": "Falha na atualização"
+  },
+  "general": {
+    "sectionTitle": "Geral",
+    "theme": "Tema"
+  },
+  "category": {
+    "sync": "Sincronização",
+    "about": "Sobre",
+    "other": "Outros",
+    "storage": "Armazenamento",
+    "history": "Histórico",
+    "background": "Segundo plano",
+    "developer": "Opções do desenvolvedor",
+    "extensions": "Extensões e permissões"
+  },
+  "hub": {
+    "clipboardSync": {
+      "title": "Sincronização da área de transferência",
+      "autoApply": {
+        "title": "Gravar automaticamente na área de transferência",
+        "desc": "Gravar automaticamente no clipboard deste dispositivo o conteúdo novo recebido do espaço"
+      },
+      "autoPush": {
+        "title": "Enviar automaticamente a área de transferência",
+        "desc": "Enviar automaticamente cópias e itens do histórico aos outros dispositivos do espaço"
+      },
+      "footer": "Estas opções controlam a direção da sincronização; as configurações de segundo plano controlam onde ela pode ser executada",
+      "updateFailed": "Falha na atualização"
+    },
+    "rows": {},
+    "summary": {
+      "history_one": "Manter até {{count}} item",
+      "history_other": "Manter até {{count}} itens",
+      "backgroundTempDisabled": "Pausado temporariamente; será retomado após reiniciar",
+      "backgroundOn": "Tarefas em segundo plano ativadas",
+      "backgroundOff": "Tarefas em segundo plano desativadas",
+      "storage": "Uso de cache, logs e histórico",
+      "about": "Versão {{version}}",
+      "developer": "Logs, depuração e atalhos"
+    }
+  },
+  "ios": {
+    "sync": {
+      "footer": "Com a gravação automática ativada, o conteúdo novo do espaço é gravado imediatamente no clipboard deste dispositivo; quando desativada, ele só é destacado na tela inicial.",
+      "autoApply": "Gravar automaticamente na área de transferência",
+      "autoPush": "Enviar automaticamente a área de transferência",
+      "sse": "Envio ao vivo (SSE)"
+    },
+    "extensions": {
+      "footer": "As extensões de teclado e compartilhamento permitem usar o UniClip diretamente em outros apps; defina o acesso à área de transferência como Permitir para evitar solicitações repetidas durante a sincronização.",
+      "keyboard": "Teclado",
+      "share": "Compartilhar",
+      "clipboardAccess": "Acesso à área de transferência"
+    },
+    "keyboardHint": {
+      "needsFullAccess": "Requer acesso total",
+      "notEnabled": "Não ativado"
+    },
+    "general": {
+      "checkUpdateOnLaunch": "Verificar atualizações ao iniciar"
+    },
+    "about": {
+      "projectHome": "Página do projeto",
+      "version": "Versão"
+    }
+  },
+  "openSystemSettings": "Abrir configurações do sistema",
+  "analytics": {
+    "sectionTitle": "Privacidade",
+    "consentTitle": "Compartilhar estatísticas anônimas de uso",
+    "consentDescription": "Ajuda a melhorar o UniClip sem coletar conteúdo da área de transferência ou nomes",
+    "footer": "Podem ser enviados versão do app, sistema, região, sessão, número de dispositivos e grupo anônimo do espaço.",
+    "reset": "Redefinir",
+    "resetTitle": "Redefinir identidade estatística",
+    "resetMessage": "As estatísticas pendentes serão removidas e uma nova identidade anônima será criada.",
+    "resetConfirm": "Redefinir identidade",
+    "resetDone": "Identidade estatística redefinida",
+    "error": "Não foi possível atualizar as configurações de estatísticas"
+  }
+}

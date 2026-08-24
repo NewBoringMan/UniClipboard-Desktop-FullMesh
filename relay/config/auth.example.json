@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 2,
+  "spaces": {
+    "replace_with_opaque_space_id": {
+      "tokenSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

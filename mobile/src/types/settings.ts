@@ -1,0 +1,153 @@
+import { Platform } from 'react-native';
+import * as Application from 'expo-application';
+import { isTestBuildVersion } from '@/features/updates';
+
+export interface SharedSettings {
+  // Sync behavior
+  autoApplyRemote: boolean;
+  autoPushLocal: boolean;
+  /** Relay addresses are non-sensitive; access tokens stay in native secure storage. */
+  customRelayUrls: string[];
+
+  // Attachment & cache
+  attachmentAutoDownload: 'wifi' | 'always' | 'off';
+  payloadCacheMaxBytes: number;
+
+  // History
+  maxHistoryItems: number;
+
+  // Updates
+  autoCheckUpdate: boolean;
+  updateToBeta: boolean;
+  ignoredVersion: string | null;
+
+  // Appearance
+  appearance: 'system' | 'light' | 'dark';
+  /** 界面语言偏好:'system' 跟随系统,或具体语言代码('zh-CN' | 'en' | 'ru' | 'pt-BR')。见 src/i18n */
+  language: string;
+
+  // Logging & debug
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  debugMode: boolean;
+
+  // Downloads
+  downloadRelativePath: string;
+
+  // iOS keyboard extension (consumed by the native keyboard via App Group)
+  keyboardSoundFeedback: boolean;
+  keyboardHapticFeedback: boolean;
+
+  /** One-time recovery state for users upgraded from the removed LAN connection flow. */
+  legacyPairingGuide: 'none' | 'pending';
+}
+
+export type ClipboardAccessMethod = 'overlay-polling' | 'overlay-event' | 'shizuku';
+
+export interface AndroidSettings {
+  // Background tasks
+  enableBackgroundTasks: boolean;
+  enableBackgroundDownload: boolean;
+  enableBackgroundUpload: boolean;
+  /** Whether background synchronization may use mobile data or requires Wi-Fi. */
+  backgroundSyncNetwork: 'any' | 'wifi';
+  clipboardAccessMethod: ClipboardAccessMethod;
+  enableClipboardOverlay: boolean;
+  enableForegroundNotification: boolean;
+
+  // Notifications
+  enableNotifications: boolean;
+  syncToastEnabled: boolean;
+
+  // UI
+  hideFromRecents: boolean;
+  showImageCopyButton: boolean;
+
+  // Debug
+  debugOverlayVisible: boolean;
+  debugUrlScheme: boolean;
+  debugUpdateCheckNoLimit: boolean;
+}
+
+export type AppSettings = SharedSettings & AndroidSettings;
+
+export interface RuntimeState {
+  lastUpdateCheckDate: string;
+  needsHistoryReorganize: boolean;
+}
+
+export const SHARED_DEFAULTS: SharedSettings = {
+  autoApplyRemote: true,
+  autoPushLocal: true,
+  customRelayUrls: [],
+
+  attachmentAutoDownload: 'wifi',
+  payloadCacheMaxBytes: 200 * 1024 * 1024,
+
+  maxHistoryItems: 1000,
+
+  autoCheckUpdate: true,
+  updateToBeta: false,
+  ignoredVersion: null,
+
+  appearance: 'system',
+  language: 'system',
+
+  logLevel: __DEV__ ? 'debug' : 'info',
+  debugMode: false,
+
+  downloadRelativePath: '',
+
+  keyboardSoundFeedback: true,
+  keyboardHapticFeedback: true,
+
+  legacyPairingGuide: 'none',
+};
+
+export const ANDROID_DEFAULTS: AndroidSettings = {
+  enableBackgroundTasks: false,
+  enableBackgroundDownload: false,
+  enableBackgroundUpload: false,
+  backgroundSyncNetwork: 'any',
+  clipboardAccessMethod: 'overlay-polling',
+  enableClipboardOverlay: false,
+  enableForegroundNotification: true,
+
+  enableNotifications: true,
+  syncToastEnabled: true,
+
+  hideFromRecents: false,
+  showImageCopyButton: false,
+
+  debugOverlayVisible: false,
+  debugUrlScheme: false,
+  debugUpdateCheckNoLimit: false,
+};
+
+export const IOS_DEFAULTS: Pick<SharedSettings, 'autoApplyRemote' | 'autoPushLocal'> = {
+  autoApplyRemote: true,
+  autoPushLocal: true,
+};
+
+export function createDefaultSettings(platform: string, appVersion = ''): AppSettings {
+  const platformDefaults = platform === 'ios' ? IOS_DEFAULTS : {};
+  const updateToBeta = platform === 'android' && isTestBuildVersion(appVersion);
+
+  return {
+    ...SHARED_DEFAULTS,
+    ...ANDROID_DEFAULTS,
+    ...platformDefaults,
+    updateToBeta,
+  };
+}
+
+export const DEFAULT_SETTINGS: AppSettings = createDefaultSettings(
+  Platform.OS,
+  Application.nativeApplicationVersion ?? ''
+);
+
+export const RUNTIME_STATE_DEFAULTS: RuntimeState = {
+  lastUpdateCheckDate: '',
+  needsHistoryReorganize: false,
+};
+
+export const SETTINGS_SCHEMA_VERSION = 9;

@@ -1,0 +1,98 @@
+{
+  "empty": {
+    "unconfigured": {
+      "title": "No P2P space yet",
+      "description": "Join a space with an invitation to continue syncing. Your local history stays available."
+    },
+    "connecting": {
+      "title": "Connecting…",
+      "description": "Connecting to devices in {{space}}."
+    },
+    "online": {
+      "title": "Your clipboard is in sync",
+      "description": "Copy something on any paired device and it'll appear here."
+    },
+    "offline": {
+      "title": "Devices in {{space}} are offline",
+      "description": "Other devices are currently unreachable. Check their network connection."
+    },
+    "error": {
+      "title": "Sync needs attention",
+      "description": "Sync is paused. Check your space and network status."
+    }
+  },
+  "topBar": {
+    "selectedCount": "{{n}} selected",
+    "deselectAll": "Deselect all",
+    "searchPlaceholder": "Search clipboard",
+    "mySpace": "My Space",
+    "openSpaceA11y": "Open My Space",
+    "spaceUnconfigured": "Not joined"
+  },
+  "a11y": {
+    "addContent": "Add content",
+    "closeMenu": "Close menu",
+    "closeCamera": "Close camera",
+    "switchCamera": "Switch camera",
+    "toggleFlash": "Toggle flash",
+    "takePicture": "Take picture",
+    "startRecording": "Start recording",
+    "stopRecording": "Stop recording"
+  },
+  "fab": {
+    "takePhoto": "Take photo",
+    "pickImage": "Photo library",
+    "pickFile": "Choose file",
+    "uploadClipboard": "Upload clipboard",
+    "syncNow": "Sync now",
+    "photoMode": "Photo",
+    "videoMode": "Video"
+  },
+  "toast": {
+    "copied": "Copied to clipboard",
+    "copiedLocal": "Copied to this device",
+    "copiedAutoPushEnabled": "Copied; automatic push is on",
+    "copyFailed": "Copy failed",
+    "copiedPlainText": "Copied as plain text",
+    "savedToGallery": "Saved to gallery",
+    "saveFailed": "Save failed",
+    "savedFile": "File saved",
+    "deleted": "Deleted",
+    "copiedSelected": "Copied selected items",
+    "syncDone": "Sync complete",
+    "syncFailed": "Sync failed",
+    "sentToPeers": "Sent to your other devices",
+    "uploadFailed": "Upload failed",
+    "savedLocally": "Saved locally",
+    "p2pDelivery": {
+      "delivered": "Delivered to your other devices",
+      "partial": "Partially delivered: {{accepted}} sent, {{duplicate}} already present, {{offline}} offline, {{errored}} failed, {{pending}} pending",
+      "offline": "Saved here; the other device is offline",
+      "failed": "Saved here; sending failed",
+      "pending": "Saved here; still sending"
+    },
+    "pickFileFailed": "Couldn't pick a file",
+    "pickImageFailed": "Couldn't pick an image",
+    "cameraPermissionNeeded": "Camera permission required",
+    "micPermissionNeeded": "Microphone permission required",
+    "takePhotoFailed": "Couldn't take photo",
+    "takeVideoFailed": "Couldn't record video",
+    "cameraUnavailable": "Camera unavailable"
+  },
+  "detail": {
+    "placeholderTitle": "Select an item",
+    "placeholderDesc": "Pick any entry from the list to see its full content and actions here.",
+    "fromDevice": "From {{device}}",
+    "unknownDevice": "This device",
+    "quickActions": {
+      "select": "Select",
+      "open": "Open",
+      "save": "Save"
+    },
+    "close": "Close details"
+  },
+  "rail": {
+    "filters": "Filter",
+    "all": "All"
+  }
+}

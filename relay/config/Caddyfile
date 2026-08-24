@@ -1,0 +1,26 @@
+{
+  admin off
+}
+
+https://{$MAILBOX_HOST}:8443 {
+  tls /run/secrets/mailbox_tls_cert /run/secrets/mailbox_tls_key
+  log {
+    output discard
+  }
+
+  encode zstd gzip
+  request_body {
+    max_size 11MB
+  }
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    -Server
+  }
+  reverse_proxy mailbox:8787 {
+    header_up -X-Forwarded-For
+    header_up -X-Forwarded-Host
+    header_up -X-Forwarded-Proto
+  }
+}

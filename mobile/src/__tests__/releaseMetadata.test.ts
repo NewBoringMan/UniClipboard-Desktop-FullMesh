@@ -1,0 +1,127 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const validatorPath = join(__dirname, '..', '..', 'scripts', 'validate-release.mjs');
+
+function createReleaseFixture(options?: {
+  androidBuild?: number;
+  iosBuild?: string;
+  changelogTag?: string;
+  englishChangelogTag?: string;
+  releaseChannel?: { name: 'alpha'; number: number };
+}): string {
+  const root = mkdtempSync(join(tmpdir(), 'uniclip-release-metadata-'));
+  const androidBuild = options?.androidBuild ?? 156;
+  const iosBuild = options?.iosBuild ?? '156';
+  const changelogTag = options?.changelogTag ?? 'v1.3.0.156';
+
+  writeFileSync(
+    join(root, 'app.json'),
+    JSON.stringify({
+      expo: {
+        version: '1.3.0',
+        android: { versionCode: androidBuild },
+        ios: { buildNumber: iosBuild },
+        extra: options?.releaseChannel ? { releaseChannel: options.releaseChannel } : {},
+      },
+    })
+  );
+  writeFileSync(join(root, 'CHANGES.md'), `${changelogTag}\n- 中文发布说明\n`);
+  writeFileSync(
+    join(root, 'CHANGES.en.md'),
+    `${options?.englishChangelogTag ?? changelogTag}\n- English release note\n`
+  );
+  return root;
+}
+
+function validate(root: string) {
+  return spawnSync(process.execPath, [validatorPath, '--root', root], {
+    encoding: 'utf8',
+  });
+}
+
+describe('release metadata validation', () => {
+  const fixtureRoots: string[] = [];
+
+  afterEach(() => {
+    for (const root of fixtureRoots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['stable', 'v1.3.0.156', 'prerelease=false'],
+    ['beta', 'v1.3.0.156-beta2', 'prerelease=true'],
+  ])('derives a valid %s tag from committed metadata', (_name, tag, prereleaseLine) => {
+    const root = createReleaseFixture({ changelogTag: tag });
+    fixtureRoots.push(root);
+
+    const result = validate(root);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`tag=${tag}`);
+    expect(result.stdout).toContain(prereleaseLine);
+  });
+
+  it('accepts an Alpha tag only when app metadata identifies the same Alpha build', () => {
+    const tag = 'v1.3.0.156-alpha.1';
+    const root = createReleaseFixture({
+      changelogTag: tag,
+      releaseChannel: { name: 'alpha', number: 1 },
+    });
+    fixtureRoots.push(root);
+
+    const result = validate(root);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(`tag=${tag}`);
+    expect(result.stdout).toContain('prerelease=true');
+  });
+
+  it('rejects localized changelogs whose release tags drift apart', () => {
+    const root = createReleaseFixture({ englishChangelogTag: 'v1.3.0.156-beta1' });
+    fixtureRoots.push(root);
+
+    const result = validate(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('CHANGES.en.md');
+  });
+
+  it('rejects malformed app.json without an uncaught exception', () => {
+    const root = createReleaseFixture();
+    fixtureRoots.push(root);
+    writeFileSync(join(root, 'app.json'), '{ invalid json');
+
+    const result = validate(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('cannot read app.json');
+    expect(result.stderr).not.toContain('\n    at ');
+  });
+
+  it('rejects Android and iOS build counters that drift apart', () => {
+    const root = createReleaseFixture({ iosBuild: '155' });
+    fixtureRoots.push(root);
+
+    const result = validate(root);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('must match');
+  });
+
+  it.each(['v1.3.0.155', 'v1.3.0.156-preview1', 'release-1.3.0.156'])(
+    'rejects a changelog tag that does not describe the app build: %s',
+    (changelogTag) => {
+      const root = createReleaseFixture({ changelogTag });
+      fixtureRoots.push(root);
+
+      const result = validate(root);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('CHANGES.md');
+    }
+  );
+});

@@ -1,0 +1,3 @@
+DROP TABLE clipboard_origin_sequence;
+DROP INDEX idx_clipboard_recent_event_expiry;
+DROP TABLE clipboard_recent_event;

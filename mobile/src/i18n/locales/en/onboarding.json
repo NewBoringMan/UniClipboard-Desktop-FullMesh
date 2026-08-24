@@ -1,0 +1,43 @@
+{
+  "skip": "Skip",
+  "continue": "Continue",
+  "setup": {
+    "title": "Start syncing",
+    "body": "Create a new encrypted space or join an existing one with an invitation.",
+    "create": "Create new space",
+    "join": "Join existing space"
+  },
+  "result": {
+    "title": "Your space is ready",
+    "body": "This device can now sync your clipboard securely through the space.",
+    "enter": "Enter"
+  },
+  "migration": {
+    "title": "Syncing has been upgraded",
+    "body": "UniClip v2 upgrades LAN sync to end-to-end encrypted sync. Your devices can now sync securely across different networks.",
+    "historyKept": "Your local clipboard history is still here",
+    "repairReason": "To establish the new secure connection, pair with your computer again once.",
+    "desktopHint": "On your computer, open My Space and generate an invitation code.",
+    "join": "Start re-pairing"
+  },
+  "welcome": {
+    "wordmark": "UniClip",
+    "title": "Your clipboard,\non every device",
+    "body": "All your own devices sharing one clipboard — no collaboration, no cloud."
+  },
+  "companion": {
+    "title": "A companion\nto your computer",
+    "body": "Connect to the UniClipboard desktop app that's already running, and bring your clipboard to hand.",
+    "spec": "COMPANION · CONNECTS TO DESKTOP"
+  },
+  "action": {
+    "title": "Copy here, paste there",
+    "body": "Copy on your computer and paste on your phone; use the share sheet to send anything back.",
+    "types": "Text · Link · Image · File",
+    "pair": "Scan to pair",
+    "later": "Not now",
+    "pile": {
+      "note": "Meeting notes\nWed 10:00\nAlign the plan"
+    }
+  }
+}

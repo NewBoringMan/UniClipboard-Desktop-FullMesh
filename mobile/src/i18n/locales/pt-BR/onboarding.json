@@ -1,0 +1,43 @@
+{
+  "skip": "Pular",
+  "continue": "Continuar",
+  "setup": {
+    "title": "Começar a sincronizar",
+    "body": "Crie um novo espaço criptografado ou entre em um espaço existente com um convite.",
+    "create": "Criar novo espaço",
+    "join": "Entrar em um espaço"
+  },
+  "result": {
+    "title": "Seu espaço está pronto",
+    "body": "Este dispositivo agora pode sincronizar sua área de transferência com segurança pelo espaço.",
+    "enter": "Entrar"
+  },
+  "migration": {
+    "title": "A sincronização foi atualizada",
+    "body": "O UniClip v2 evoluiu da sincronização em rede local para a sincronização com criptografia de ponta a ponta. Seus dispositivos agora sincronizam com segurança em redes diferentes.",
+    "historyKept": "Seu histórico local da área de transferência foi mantido",
+    "repairReason": "Para criar a nova conexão segura, pareie novamente com o computador uma vez.",
+    "desktopHint": "No computador, abra Meu espaço e gere um código de convite.",
+    "join": "Iniciar novo pareamento"
+  },
+  "welcome": {
+    "wordmark": "UniClip",
+    "title": "A área de transferência\nem cada dispositivo",
+    "body": "Todos os seus dispositivos compartilham a mesma área de transferência — sem colaboração, sem nuvem."
+  },
+  "companion": {
+    "title": "O companheiro\ndo seu computador",
+    "body": "Conecte-se ao app UniClipboard que já está rodando no computador e tenha a área de transferência sempre à mão.",
+    "spec": "MODO COMPANHEIRO · CONECTA AO COMPUTADOR"
+  },
+  "action": {
+    "title": "Copiou, chegou",
+    "body": "Copie no computador e cole no celular; use o menu de compartilhamento para enviar qualquer coisa de volta.",
+    "types": "Texto · Link · Imagem · Arquivo",
+    "pair": "Escanear para parear",
+    "later": "Agora não",
+    "pile": {
+      "note": "Reunião\nQua 10:00\nAlinhar prazos"
+    }
+  }
+}

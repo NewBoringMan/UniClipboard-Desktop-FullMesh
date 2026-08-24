@@ -1,0 +1,85 @@
+name: uniclipboard-fullmesh-relay
+services:
+  iroh-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile.iroh-relay
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "80:80/tcp"
+      - "443:443/tcp"
+      - "7824:7824/udp"
+      - "127.0.0.1:9090:9090/tcp"
+    volumes:
+      - ./config/iroh-relay.production.toml:/etc/iroh-relay/config.toml:ro
+      - iroh-certs:/var/lib/iroh-relay/certs
+    restart: unless-stopped
+
+  mailbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      MAILBOX_AUTH_FILE: /run/secrets/mailbox_auth
+      MAX_PAYLOAD_BYTES: "10485760"
+      MAX_MAILBOX_BYTES: "52428800"
+      MAX_MESSAGES_PER_MAILBOX: "100"
+      MIN_TTL_SECONDS: "30"
+      MAX_TTL_SECONDS: "86400"
+      RATE_PER_MINUTE: "120"
+      RATE_BURST: "30"
+    ports:
+      - "127.0.0.1:8787:8787/tcp"
+    secrets:
+      - mailbox_auth
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    volumes:
+      - mailbox-data:/var/lib/uniclipboard-mailbox
+    restart: unless-stopped
+
+  mailbox-proxy:
+    image: caddy:2.10.2-alpine
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    depends_on:
+      - mailbox
+    environment:
+      MAILBOX_HOST: ${MAILBOX_HOST:?set MAILBOX_HOST}
+    ports:
+      - "8443:8443/tcp"
+    secrets:
+      - mailbox_tls_cert
+      - mailbox_tls_key
+    tmpfs:
+      - /config:rw,noexec,nosuid,size=16m
+      - /tmp:rw,noexec,nosuid,size=16m
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - mailbox-caddy-data:/data
+    restart: unless-stopped
+
+secrets:
+  mailbox_auth:
+    file: ./config/auth.json
+  mailbox_tls_cert:
+    file: ./config/tls/fullchain.pem
+  mailbox_tls_key:
+    file: ./config/tls/privkey.pem
+
+volumes:
+  iroh-certs:
+  mailbox-data:
+  mailbox-caddy-data:

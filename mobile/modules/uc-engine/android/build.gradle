@@ -1,0 +1,60 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+def coreSource = new groovy.json.JsonSlurper().parse(file('../core-source.json'))
+def coreVersion = coreSource.version.replaceFirst(/^(core-)?v/, '')
+def localEngineAar = System.getenv('UC_ENGINE_LOCAL_AAR')
+def useLocalEngineAar = localEngineAar != null && !localEngineAar.trim().isEmpty()
+def localEngineMaven = System.getenv('UC_ENGINE_LOCAL_MAVEN')
+def useLocalEngineMaven = localEngineMaven != null && !localEngineMaven.trim().isEmpty()
+def localEngineVersion = System.getenv('UC_ENGINE_LOCAL_VERSION')
+def resolvedEngineVersion = useLocalEngineMaven && localEngineVersion != null && !localEngineVersion.trim().isEmpty()
+  ? localEngineVersion.trim()
+  : coreVersion
+
+group = 'expo.modules.ucengine'
+version = coreVersion
+
+repositories {
+  if (useLocalEngineMaven) {
+    maven { url = uri(localEngineMaven) }
+  }
+  maven { url = uri('release-maven') }
+}
+
+android {
+  namespace "expo.modules.ucengine"
+  defaultConfig {
+    versionCode 1
+    versionName coreVersion
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    ndk {
+      abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+    }
+  }
+}
+
+dependencies {
+  implementation useLocalEngineAar
+    ? files(localEngineAar)
+    : "app.uniclipboard:uniclipboard-engine:${resolvedEngineVersion}"
+  if (useLocalEngineAar) {
+    implementation 'net.java.dev.jna:jna:5.14.0@aar'
+  }
+  androidTestImplementation 'androidx.test:core:1.6.1'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+}
+
+def verifyUcEngineRelease = tasks.register('verifyUcEngineRelease', Exec) {
+  workingDir rootProject.projectDir.parentFile
+  commandLine 'node', 'scripts/verify-unified-engine-core.mjs', '--prepared'
+}
+
+tasks.named('preBuild').configure {
+  if (!useLocalEngineAar && !useLocalEngineMaven) {
+    dependsOn verifyUcEngineRelease
+  }
+}

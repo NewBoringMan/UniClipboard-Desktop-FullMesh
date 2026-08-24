@@ -1,0 +1,306 @@
+name: Release Engine
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Engine tag matching the uc-engine version
+        required: true
+        type: string
+      device_matrix_path:
+        description: Tracked device matrix JSON for this commit
+        required: true
+        type: string
+        default: scripts/release/device-matrix.skipped.json
+      prerelease:
+        description: Mark the GitHub Release as a prerelease
+        required: false
+        type: boolean
+        default: true
+      dry_run:
+        description: Build and verify without creating a tag or Release
+        required: false
+        type: boolean
+        default: true
+      reverify_existing_release:
+        description: Re-run release checks for an existing immutable Release
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-engine
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate release request
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      commit: ${{ steps.release.outputs.commit }}
+      device_matrix_path: ${{ steps.release.outputs.device_matrix_path }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - id: release
+        name: Resolve immutable release inputs
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_MATRIX: ${{ inputs.device_matrix_path }}
+          REVERIFY_EXISTING: ${{ inputs.reverify_existing_release }}
+        run: |
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            tag="$PUSH_TAG"
+            matrix="scripts/release/device-matrix.skipped.json"
+          else
+            tag="$INPUT_TAG"
+            matrix="$INPUT_MATRIX"
+          fi
+          node scripts/release/verify-version.mjs "$tag" uc-engine
+          if [[ "$REVERIFY_EXISTING" == "true" ]]; then
+            commit=$(git rev-list -n 1 "$tag")
+            if [[ -z "$commit" ]]; then
+              echo "Existing release tag did not resolve to a commit: $tag" >&2
+              exit 1
+            fi
+          else
+            commit=$(git rev-parse HEAD)
+          fi
+          if ! git cat-file -e "$commit:$matrix"; then
+            echo "Device matrix must be tracked by the release commit: $matrix" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "device_matrix_path=$matrix" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse mutable or duplicate release names
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.reverify_existing_release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $TAG" >&2
+            exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release already exists: $TAG" >&2
+            exit 1
+          fi
+
+  ios:
+    name: Build iOS
+    needs: prepare
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Install iOS targets
+        shell: bash
+        run: |
+          toolchain=$(rustup show active-toolchain | awk '{print $1}')
+          rustup target add --toolchain "$toolchain" \
+            aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: . -> target
+          shared-key: engine-release-ios
+
+      - name: Build iOS assets
+        env:
+          UC_ENGINE_UNIFFI_BUILD_LOCKED: '1'
+          UC_ENGINE_UNIFFI_DIST_DIR: ${{ runner.temp }}/engine-dist
+        run: bindings/uc-engine-uniffi/scripts/build-ios-xcframework.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ios-assets
+          path: ${{ runner.temp }}/engine-dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  android:
+    name: Build Android
+    needs: prepare
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Install Android targets and build helper
+        shell: bash
+        run: |
+          toolchain=$(rustup show active-toolchain | awk '{print $1}')
+          rustup target add --toolchain "$toolchain" \
+            armv7-linux-androideabi aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --locked
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: . -> target
+          shared-key: engine-release-android
+
+      - name: Build Android assets
+        env:
+          UC_ENGINE_UNIFFI_BUILD_LOCKED: '1'
+          UC_ENGINE_UNIFFI_DIST_DIR: ${{ runner.temp }}/engine-dist
+        run: bindings/uc-engine-uniffi/scripts/build-android-aar.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-assets
+          path: ${{ runner.temp }}/engine-dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  harmonyos:
+    name: Build HarmonyOS
+    needs: prepare
+    runs-on: [self-hosted, macOS, ARM64, deveco]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+
+      - name: Install HarmonyOS Rust target
+        shell: bash
+        run: |
+          toolchain=$(rustup show active-toolchain | awk '{print $1}')
+          rustup target add --toolchain "$toolchain" aarch64-unknown-linux-ohos
+
+      - name: Build HarmonyOS assets and signed acceptance HAP
+        env:
+          RUSTC_WRAPPER: ''
+          UC_OHOS_DIST_DIR: ${{ runner.temp }}/engine-dist/ohos
+          UC_OHOS_TARGET_DIR: ${{ runner.temp }}/uc-ohos-target
+        run: tests/hosts/ohos/build-emulator.sh
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: harmonyos-assets
+          path: ${{ runner.temp }}/engine-dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: Verify and publish one release bundle
+    needs: [prepare, ios, android, harmonyos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ needs.prepare.outputs.tag }}
+      commit: ${{ needs.prepare.outputs.commit }}
+      published: ${{ steps.publication.outputs.published }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: '*-assets'
+          path: ${{ runner.temp }}/engine-dist
+          merge-multiple: true
+
+      - name: Stage source, licenses, debug material, and manifest
+        run: >-
+          node scripts/release/stage-engine-release.mjs
+          "${{ runner.temp }}/engine-dist"
+          "${{ needs.prepare.outputs.device_matrix_path }}"
+
+      - name: Upload verified dry-run bundle
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ needs.prepare.outputs.tag }}-verified
+          path: ${{ runner.temp }}/engine-dist/release-assets/
+          if-no-files-found: error
+          retention-days: 14
+
+      - id: publication
+        name: Create or verify immutable GitHub Release
+        if: ${{ github.event_name == 'push' || !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
+          REVERIFY_EXISTING: ${{ github.event_name == 'workflow_dispatch' && inputs.reverify_existing_release }}
+          ASSET_DIR: ${{ runner.temp }}/engine-dist/release-assets
+        shell: bash
+        run: |
+          if [[ "$REVERIFY_EXISTING" == "true" ]]; then
+            gh release view "$TAG" >/dev/null
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          prerelease_flag=()
+          if [[ "$PRERELEASE" == "true" ]]; then prerelease_flag+=(--prerelease); fi
+          gh release create "$TAG" \
+            --target "$COMMIT" \
+            --title "UniClipboardEngine $TAG" \
+            --generate-notes \
+            "${prerelease_flag[@]}" \
+            "$ASSET_DIR"/*
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+  notify-consumers:
+    name: Notify desktop and mobile consumers
+    needs: assemble
+    if: ${{ needs.assemble.outputs.published == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        with:
+          client-id: ${{ secrets.ENGINE_RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.ENGINE_RELEASE_APP_PRIVATE_KEY }}
+          owner: UniClipboard
+          repositories: |-
+            UniClipboard
+            UniClip
+          permission-contents: write
+
+      - name: Dispatch published Engine release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ENGINE_VERSION: ${{ needs.assemble.outputs.tag }}
+          ENGINE_COMMIT: ${{ needs.assemble.outputs.commit }}
+        shell: bash
+        run: |
+          payload=$(jq -n \
+            --arg version "$ENGINE_VERSION" \
+            --arg commit "$ENGINE_COMMIT" \
+            '{event_type: "engine_release_published", client_payload: {repository: "UniClipboard/Engine", version: $version, source_commit: $commit}}')
+          for repository in UniClipboard/UniClipboard UniClipboard/UniClip; do
+            gh api --method POST "repos/$repository/dispatches" --input - <<<"$payload"
+          done

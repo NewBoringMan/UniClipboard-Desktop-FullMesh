@@ -1,0 +1,93 @@
+{
+  "title": "Sobre",
+  "versionLabel": "Versão",
+  "update": {
+    "check": "Verificar atualizações",
+    "checking": "Verificando...",
+    "updateTo": "Atualizar para {{version}}",
+    "upToDate": "Você está na versão mais recente",
+    "checkFailed": "Falha ao verificar atualizações; verifique sua conexão de rede"
+  },
+  "autoCheck": {
+    "label": "Verificar atualizações automaticamente"
+  },
+  "updateToBeta": {
+    "label": "Atualizar para beta"
+  },
+  "download": {
+    "newVersionTitle": "Nova versão disponível",
+    "latestVersion": "Versão mais recente: {{version}}",
+    "currentVersion": "Versão atual: {{version}}",
+    "releaseNotes": "Notas da versão:\n{{notes}}",
+    "r2": "Baixar (recomendado)",
+    "github": "Baixar do GitHub",
+    "downloading": "Baixando {{percent}}%",
+    "canceled": "Download cancelado",
+    "failed": "Falha no download",
+    "noSuitableApk": "Nenhum APK adequado encontrado para este dispositivo"
+  },
+  "cancelDownload": {
+    "title": "Cancelar download",
+    "message": "Tem certeza de que deseja cancelar o download?",
+    "confirm": "Cancelar download",
+    "dismiss": "Continuar baixando"
+  },
+  "error": {
+    "saveFailed": "Falha ao salvar as configurações"
+  },
+  "log": {
+    "title": "Logs",
+    "levelLabel": "Nível de log",
+    "level": {
+      "debug": "Depuração",
+      "info": "Informações",
+      "warn": "Aviso",
+      "error": "Erro"
+    },
+    "setSuccess": "Nível de log definido como {{level}}",
+    "setFailed": "Falha ao definir o nível de log",
+    "exportLabel": "Exportar logs",
+    "export": "Exportar",
+    "exported": "Logs salvos",
+    "exportMethodPrompt": "Escolha se deseja compartilhar os logs ou exportá-los como arquivo.",
+    "exportFile": "Exportar arquivo",
+    "shareFailed": "Falha ao compartilhar logs",
+    "exportCanceled": "Exportação cancelada",
+    "exportFailed": "Falha ao exportar logs"
+  },
+  "debug": {
+    "title": "Depuração",
+    "modeLabel": "Modo de depuração",
+    "modeEnabled": "Modo de depuração ativado",
+    "modeDisabled": "Modo de depuração desativado",
+    "overlayLabel": "Mostrar sobreposição",
+    "overlayDesc": "Mostra uma sobreposição visível ao ler a área de transferência em segundo plano",
+    "overlayVisibleToast": "A sobreposição ficará visível em segundo plano",
+    "overlayHiddenToast": "Sobreposição oculta",
+    "urlSchemeLabel": "Mostrar chamadas de esquema de URL",
+    "updateNoLimitLabel": "Verificações de atualização ilimitadas",
+    "updateNoLimitDesc": "Quando ativado, verifica atualizações a cada inicialização, em vez de uma vez por dia",
+    "deviceTrustPreview": {
+      "label": "Pré-visualizar decisão de relação entre dispositivos",
+      "description": "Abra o diálogo real com dados de exemplo seguros",
+      "pickerTitle": "Escolha um cenário de pré-visualização",
+      "pickerDescription": "As ações de pré-visualização ficam neste dispositivo e não alteram relações reais.",
+      "unavailable": "Conclua a ação atual de relação entre dispositivos antes de abrir a pré-visualização",
+      "scenarios": {
+        "standard": "Duas opções disponíveis",
+        "singleChoice": "Apenas uma opção disponível",
+        "confirmKeepCurrent": "Confirmar manutenção do grupo atual",
+        "confirmLeaveCurrent": "Confirmar saída do grupo atual",
+        "submitting": "Enviando",
+        "failedRetry": "Falhou, pronto para tentar novamente",
+        "stateChanged": "Estado alterado em outro dispositivo",
+        "longScrollable": "Nomes longos e muitos dispositivos"
+      }
+    }
+  },
+  "stats": {
+    "title": "Estatísticas",
+    "view": "Ver",
+    "copied": "Estatísticas copiadas"
+  }
+}

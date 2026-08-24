@@ -1,0 +1,237 @@
+import React, { useState } from 'react';
+import { Linking, PlatformColor } from 'react-native';
+import { useTranslation } from 'react-i18next';
+import {
+  Button as SwiftUIButton,
+  HStack,
+  Image,
+  Spacer,
+  Text as SwiftUIText,
+  Toggle,
+} from '@expo/ui/swift-ui';
+import {
+  background,
+  buttonStyle,
+  contentShape,
+  cornerRadius,
+  disabled as disabledModifier,
+  font,
+  foregroundStyle,
+  frame,
+  glassEffect,
+  listRowBackground,
+  padding,
+  opacity,
+  shapes,
+  tint,
+  accessibilityHint as accessibilityHintModifier,
+  accessibilityLabel as accessibilityLabelModifier,
+} from '@expo/ui/swift-ui/modifiers';
+import type { SFSymbol } from 'sf-symbols-typescript';
+
+import { iosColors } from '@/theme/iosDesignTokens';
+
+/** iOS system palette for settings icon tiles (iOS Settings app style). */
+export const settingsTileColors = {
+  blue: '#007AFF',
+  teal: '#32ADE6',
+  green: '#34C759',
+  orange: '#FF9500',
+  red: '#FF3B30',
+  indigo: '#5856D6',
+  purple: '#AF52DE',
+  gray: '#8E8E93',
+} as const;
+
+export const chevronColor = '#8E8E93';
+export const headerIconColor = '#AEAEB2';
+export const statusGreen = settingsTileColors.green;
+export const statusOrange = settingsTileColors.orange;
+
+const settingsNavigationDelayMs = 120;
+const settingsRowPressedColor = iosColors?.tertiarySystemFill ?? 'gray';
+
+/**
+ * iOS 系统绿开关。设置界面根 VStack 级联了墨色 accent tint(SettingsScreen.ios.tsx),
+ * 会把 SwiftUI Toggle 的轨道也染成主题色;这里用 systemGreen 覆盖,让所有开关走 iOS
+ * 原生绿轨道,而按钮/导航链接等仍保持 accent。新增设置开关统一用本组件而非裸 Toggle。
+ */
+const switchGreenTint = tint(PlatformColor('systemGreen'));
+
+export function SettingsToggle({ modifiers, ...rest }: React.ComponentProps<typeof Toggle>) {
+  return <Toggle {...rest} modifiers={[...(modifiers ?? []), switchGreenTint]} />;
+}
+
+/** Rounded-square colored icon, like the leading icons in the iOS Settings app. */
+export function SettingsIconTile({ systemName, color }: { systemName: SFSymbol; color: string }) {
+  return (
+    <Image
+      systemName={systemName}
+      size={15}
+      color="white"
+      modifiers={[frame({ width: 28, height: 28 }), background(color), cornerRadius(6)]}
+    />
+  );
+}
+
+export interface SettingsNavRowProps {
+  icon?: SFSymbol;
+  iconColor?: string;
+  title: string;
+  /** Trailing secondary text (count, status, …). */
+  value?: string;
+  /** Hex color for the trailing text; defaults to secondary label. */
+  valueColor?: string;
+  destructive?: boolean;
+  disabled?: boolean;
+  showsChevron?: boolean;
+  showsPressFeedback?: boolean;
+  accessibilityHint?: string;
+  onPress: () => void;
+}
+
+/** Full-width tappable row: optional icon tile + title … value + chevron. */
+export function SettingsNavRow({
+  icon,
+  iconColor,
+  title,
+  value,
+  valueColor,
+  destructive = false,
+  disabled = false,
+  showsChevron = true,
+  showsPressFeedback = true,
+  accessibilityHint,
+  onPress,
+}: SettingsNavRowProps) {
+  const [isPressed, setIsPressed] = useState(false);
+
+  const handlePress = () => {
+    if (disabled || isPressed) return;
+
+    if (!showsPressFeedback) {
+      onPress();
+      return;
+    }
+
+    setIsPressed(true);
+    setTimeout(() => {
+      setIsPressed(false);
+      onPress();
+    }, settingsNavigationDelayMs);
+  };
+
+  return (
+    <SwiftUIButton
+      role={destructive ? 'destructive' : undefined}
+      onPress={handlePress}
+      modifiers={[
+        ...(isPressed ? [listRowBackground(settingsRowPressedColor)] : []),
+        disabledModifier(disabled),
+        opacity(disabled ? 0.35 : 1),
+        ...(accessibilityHint ? [accessibilityHintModifier(accessibilityHint)] : []),
+      ]}
+    >
+      <HStack spacing={12} modifiers={[frame({ maxWidth: Infinity }), contentShape(shapes.rectangle())]}>
+        {icon && iconColor ? (
+          <SettingsIconTile systemName={icon} color={iconColor} />
+        ) : null}
+        <SwiftUIText modifiers={[foregroundStyle(destructive ? settingsTileColors.red : 'primary')]}>{title}</SwiftUIText>
+        <Spacer />
+        {value ? (
+          <SwiftUIText
+            modifiers={valueColor ? [foregroundStyle(valueColor)] : [foregroundStyle('secondary')]}
+          >
+            {value}
+          </SwiftUIText>
+        ) : null}
+        {showsChevron ? <Image systemName="chevron.right" size={12} color={chevronColor} /> : null}
+      </HStack>
+    </SwiftUIButton>
+  );
+}
+
+/**
+ * Numbered guide step. Renders `N.circle.fill`, or a green checkmark once
+ * `done` — so setup progress reads at a glance.
+ */
+export function GuideStepRow({
+  index,
+  text,
+  done,
+}: {
+  index: 1 | 2 | 3 | 4 | 5;
+  text: string;
+  done?: boolean;
+}) {
+  return (
+    <HStack spacing={12} alignment="center" modifiers={[frame({ maxWidth: Infinity })]}>
+      {done ? (
+        <Image systemName="checkmark.circle.fill" size={22} color={statusGreen} />
+      ) : (
+        <Image systemName={`${index}.circle.fill` as SFSymbol} size={22} color={chevronColor} />
+      )}
+      <SwiftUIText modifiers={done ? [foregroundStyle('secondary')] : []}>{text}</SwiftUIText>
+      <Spacer />
+    </HStack>
+  );
+}
+
+/** Right-aligned status text with a leading dot icon, for LabeledContent-style rows. */
+export function StatusValue({ text, tone }: { text: string; tone: 'ok' | 'warn' | 'muted' }) {
+  const color = tone === 'ok' ? statusGreen : tone === 'warn' ? statusOrange : undefined;
+  return (
+    <HStack spacing={5} alignment="center">
+      {tone !== 'muted' ? <Image systemName="circle.fill" size={8} color={color} /> : null}
+      <SwiftUIText modifiers={color ? [foregroundStyle(color)] : [foregroundStyle('secondary')]}>
+        {text}
+      </SwiftUIText>
+    </HStack>
+  );
+}
+
+/** Glass circular header button (back chevron, add, …) matching the sheet header style. */
+export function HeaderCircleButton({
+  systemName,
+  onPress,
+  accessibilityLabel,
+  disabled = false,
+}: {
+  systemName: SFSymbol;
+  onPress: () => void;
+  accessibilityLabel?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <SwiftUIButton
+      onPress={onPress}
+      modifiers={[
+        buttonStyle('plain'),
+        disabledModifier(disabled),
+        glassEffect({ glass: { variant: 'regular', interactive: true }, shape: 'circle' }),
+        ...(accessibilityLabel ? [accessibilityLabelModifier(accessibilityLabel)] : []),
+      ]}
+    >
+      <Image
+        systemName={systemName}
+        size={20}
+        color={headerIconColor}
+        modifiers={[font({ weight: 'semibold' }), padding()]}
+      />
+    </SwiftUIButton>
+  );
+}
+
+/** Form-row button that deep-links into this app's page in the iOS Settings app. */
+export function OpenSystemSettingsButton({ label }: { label?: string }) {
+  const { t } = useTranslation('settings');
+  return (
+    <SwiftUIButton
+      systemImage="arrow.up.forward.app"
+      label={label ?? t('openSystemSettings')}
+      onPress={() => {
+        Linking.openSettings();
+      }}
+    />
+  );
+}

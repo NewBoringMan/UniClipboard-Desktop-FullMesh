@@ -1,0 +1,18 @@
+FROM rust:1.95.0-bookworm AS builder
+RUN cargo install --locked --version 1.0.0-rc.1 --features server iroh-relay
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+  && apt-get install --yes --no-install-recommends ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd --system iroh \
+  && useradd --system --gid iroh --home-dir /var/lib/iroh-relay iroh \
+  && mkdir -p /var/lib/iroh-relay/certs \
+  && chown -R iroh:iroh /var/lib/iroh-relay
+COPY --from=builder /usr/local/cargo/bin/iroh-relay /usr/local/bin/iroh-relay
+USER iroh
+EXPOSE 80/tcp 443/tcp 7824/udp 9090/tcp
+VOLUME ["/var/lib/iroh-relay"]
+ENTRYPOINT ["iroh-relay"]
+CMD ["--config-path=/etc/iroh-relay/config.toml"]
+

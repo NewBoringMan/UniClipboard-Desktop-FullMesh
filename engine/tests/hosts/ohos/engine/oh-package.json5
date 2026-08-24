@@ -1,0 +1,11 @@
+{
+  "name": "@uniclipboard/engine",
+  "version": "1.1.0-rc.6-fullmesh.1",
+  "description": "UniClipboard unified P2P engine for HarmonyOS",
+  "main": "Index.ets",
+  "author": "UniClipboard",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "libuc_ohos_napi.so": "file:./src/main/cpp/types/libuc_ohos_napi"
+  }
+}

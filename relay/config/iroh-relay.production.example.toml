@@ -1,0 +1,24 @@
+enable_relay = true
+http_bind_addr = "[::]:80"
+enable_quic_addr_discovery = true
+enable_metrics = true
+metrics_bind_addr = "[::]:9090"
+key_cache_capacity = 16384
+
+[limits]
+accept_conn_limit = 100.0
+accept_conn_burst = 250
+
+[limits.client.rx]
+bytes_per_second = 20971520
+max_burst_bytes = 41943040
+
+[tls]
+https_bind_addr = "[::]:443"
+quic_bind_addr = "[::]:7824"
+hostname = "relay.example.com"
+cert_mode = "LetsEncrypt"
+cert_dir = "/var/lib/iroh-relay/certs"
+prod_tls = true
+contact = "mailto:relay-operator@example.com"
+

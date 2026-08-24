@@ -1,0 +1,98 @@
+{
+  "empty": {
+    "unconfigured": {
+      "title": "Nenhum espaço P2P ainda",
+      "description": "Entre em um espaço com um convite para continuar sincronizando. Seu histórico local continuará disponível."
+    },
+    "connecting": {
+      "title": "Conectando…",
+      "description": "Conectando aos dispositivos em {{space}}."
+    },
+    "online": {
+      "title": "Sua área de transferência está sincronizada",
+      "description": "Copie algo em qualquer dispositivo pareado e aparecerá aqui."
+    },
+    "offline": {
+      "title": "Os dispositivos em {{space}} estão offline",
+      "description": "Os outros dispositivos estão indisponíveis. Verifique a conexão de rede deles."
+    },
+    "error": {
+      "title": "A sincronização precisa de atenção",
+      "description": "A sincronização está pausada. Verifique o espaço e a conexão de rede."
+    }
+  },
+  "topBar": {
+    "selectedCount": "{{n}} selecionados",
+    "deselectAll": "Desmarcar tudo",
+    "searchPlaceholder": "Pesquisar na área de transferência",
+    "mySpace": "Meu espaço",
+    "openSpaceA11y": "Abrir Meu espaço",
+    "spaceUnconfigured": "Não conectado"
+  },
+  "a11y": {
+    "addContent": "Adicionar conteúdo",
+    "closeMenu": "Fechar menu",
+    "closeCamera": "Fechar câmera",
+    "switchCamera": "Alternar câmera",
+    "toggleFlash": "Alternar flash",
+    "takePicture": "Tirar foto",
+    "startRecording": "Iniciar gravação",
+    "stopRecording": "Parar gravação"
+  },
+  "fab": {
+    "takePhoto": "Tirar foto",
+    "pickImage": "Fotos",
+    "pickFile": "Escolher arquivo",
+    "uploadClipboard": "Enviar área de transferência",
+    "syncNow": "Sincronizar agora",
+    "photoMode": "Foto",
+    "videoMode": "Vídeo"
+  },
+  "toast": {
+    "copied": "Copiado para a área de transferência",
+    "copiedLocal": "Copiado neste dispositivo",
+    "copiedAutoPushEnabled": "Copiado; envio automático ativado",
+    "copyFailed": "Falha ao copiar",
+    "copiedPlainText": "Copiado como texto simples",
+    "savedToGallery": "Salvo na galeria",
+    "saveFailed": "Falha ao salvar",
+    "savedFile": "Arquivo salvo",
+    "deleted": "Excluído",
+    "copiedSelected": "Itens selecionados copiados",
+    "syncDone": "Sincronização concluída",
+    "syncFailed": "Falha na sincronização",
+    "sentToPeers": "Enviado aos outros dispositivos",
+    "uploadFailed": "Falha no envio",
+    "savedLocally": "Salvo localmente",
+    "p2pDelivery": {
+      "delivered": "Entregue aos outros dispositivos",
+      "partial": "Entrega parcial: {{accepted}} enviados, {{duplicate}} já presentes, {{offline}} offline, {{errored}} falharam, {{pending}} pendentes",
+      "offline": "Salvo aqui; o outro dispositivo está offline",
+      "failed": "Salvo aqui; falha no envio",
+      "pending": "Salvo aqui; ainda enviando"
+    },
+    "pickFileFailed": "Falha ao escolher arquivo",
+    "pickImageFailed": "Falha ao escolher imagem",
+    "cameraPermissionNeeded": "Permissão de câmera necessária",
+    "micPermissionNeeded": "Permissão de microfone necessária",
+    "takePhotoFailed": "Falha ao tirar foto",
+    "takeVideoFailed": "Falha ao gravar vídeo",
+    "cameraUnavailable": "Câmera indisponível"
+  },
+  "detail": {
+    "placeholderTitle": "Selecione um item",
+    "placeholderDesc": "Toque em qualquer item da lista à esquerda para ver o conteúdo completo e as ações aqui.",
+    "fromDevice": "De {{device}}",
+    "unknownDevice": "Este dispositivo",
+    "quickActions": {
+      "select": "Selecionar",
+      "open": "Abrir",
+      "save": "Salvar"
+    },
+    "close": "Fechar detalhes"
+  },
+  "rail": {
+    "filters": "Filtros",
+    "all": "Todos"
+  }
+}

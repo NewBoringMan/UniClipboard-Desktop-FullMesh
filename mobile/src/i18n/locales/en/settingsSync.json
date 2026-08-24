@@ -1,0 +1,297 @@
+{
+  "connection": {
+    "addTitle": "Add sync connection",
+    "addSheetTitle": "Add connection",
+    "p2pDescription": "End-to-end encrypted space",
+    "invitationExpires": "Invitation expires at {{time}}"
+  },
+  "relay": {
+    "title": "Custom relay",
+    "url": "Relay address",
+    "token": "Access token (optional)",
+    "save": "Save relay",
+    "remove": "Remove relay",
+    "add": "Add relay node",
+    "edit": "Edit relay node",
+    "summary": "Not configured",
+    "configured": "Configured",
+    "configuredCount": "{{count}} nodes configured",
+    "footer": "Use an HTTP or HTTPS address. The access token is kept only in this device's secure storage.",
+    "error": {
+      "saveFailed": "Could not save relay"
+    }
+  },
+  "space": {
+    "title": "My Space",
+    "footer": "The device name, passphrase, and invitation code are used only for this operation and are not saved in app settings.",
+    "mode": "Setup method",
+    "working": "Working...",
+    "empty": {
+      "title": "Start with My Space",
+      "body": "Securely sync clipboard content between your devices."
+    },
+    "overview": {
+      "title": "Status",
+      "syncHealthy": "Sync is active",
+      "deviceSummary": "{{online}} online · {{offline}} offline",
+      "syncError": "Sync issue",
+      "devicesAvailable": "Devices available",
+      "noDevicesOnline": "No devices available to sync",
+      "noOtherDevices": "No other devices yet",
+      "otherDevicesOffline": "{{count}} other devices are offline",
+      "statusUnavailable": "Device status is unavailable",
+      "memberCount": "{{count}} devices in this space",
+      "status": {
+        "decisionRequired": "Review a device change",
+        "unverifiable": "Device details cannot be verified",
+        "updateRequired": "A device needs an update",
+        "updating": "Updating space",
+        "refreshing": "Updating device status",
+        "healthy": "Devices can sync",
+        "empty": "No space devices"
+      }
+    },
+    "create": {
+      "title": "Create a new space",
+      "description": "Start a new encrypted space on this device",
+      "action": "Create"
+    },
+    "join": {
+      "title": "Join an existing space",
+      "description": "Use an invitation generated on another device",
+      "action": "Join"
+    },
+    "field": {
+      "deviceName": "Device name",
+      "passphrase": "Space passphrase",
+      "invitationCode": "Invitation code"
+    },
+    "flow": {
+      "createTitle": "Make this device the first one",
+      "createBody": "Choose how this device appears and protect the new space with a passphrase.",
+      "joinCodeSheetTitle": "Join space",
+      "joinCodeTitle": "Enter the 8-character invitation",
+      "joinCodeBody": "The invitation is shown on a device already in the space.",
+      "joinDetailsTitle": "Confirm this device",
+      "joinDetailsBody": "Use the same space passphrase, then choose how this device appears.",
+      "continue": "Continue",
+      "waitingTitle": "Your space is ready",
+      "waitingForDevice": "Waiting for another device",
+      "waitingBody": "Keep this invitation open while the other device joins.",
+      "successTitle": "Devices connected",
+      "successBody": "This space is ready to sync clipboard content.",
+      "copyInvitation": "Copy invitation",
+      "shareInvitation": "Share invitation",
+      "shareMessage": "Join my UniClip space with invitation {{code}}.",
+      "expiresIn": "Expires in {{time}}",
+      "expired": "This invitation has expired",
+      "finishLater": "Finish later",
+      "thisDevice": "This device",
+      "otherDevice": "Other device"
+    },
+    "status": {
+      "ready": "Space is ready",
+      "spaceId": "Space ID",
+      "currentDevice": "This device: {{name}}"
+    },
+    "invitation": {
+      "title": "Invite another device",
+      "description": "Generate a time-limited invitation for the current space.",
+      "action": "Generate invitation",
+      "addAction": "Add device",
+      "addA11y": "Invite a new device",
+      "code": "Invitation code",
+      "pairingInstructions": "Enter this invitation on the new device to join this space and finish pairing.",
+      "pairedDevice": "{{device}} joined this space.",
+      "crossNetwork": "This invitation can be used by a device on another network.",
+      "sameLocalNetwork": "This invitation only works while both devices are on the same local network."
+    },
+    "devices": {
+      "title": "Space devices",
+      "empty": "No other devices yet",
+      "refreshFailed": "Could not update devices, showing the previous list.",
+      "online": "Online",
+      "offline": "Offline",
+      "thisDevice": "This device",
+      "otherTitle": "Other devices",
+      "remove": "Remove device",
+      "removeConfirm": "Remove this device from the space?",
+      "removeConfirmNamed": "Remove {{device}} from this space? Sharing to this device stops immediately, and it will need a new invitation to join again. Other offline devices may ask you to review this change when they return.",
+      "removeEffect": "Sharing to this device stops immediately, and it will need a new invitation to join again. Other offline devices may ask you to review this change when they return.",
+      "manageHint": "Opens device management",
+      "idLabel": "Device ID {{id}}"
+    },
+    "deviceDetail": {
+      "title": "Device details",
+      "updateAction": "Check for updates",
+      "identity": {
+        "label": "Device identity",
+        "local": "This device",
+        "remote": "Other device"
+      },
+      "blockedReason": {
+        "noCurrentChange": "There is no device change to review.",
+        "changeNoLongerCurrent": "This device change is no longer current. Refresh and try again.",
+        "localDeviceConfirmationRequired": "Confirm the change for this device first.",
+        "localDeviceRemoved": "This device is no longer part of the space.",
+        "recoveryNotAvailableInThisVersion": "This version cannot recover the space.",
+        "peerUpgradeRequired": "The related devices need to be updated first.",
+        "deviceFactsUnverifiable": "This device's details cannot be verified right now.",
+        "engineUnavailable": "Space device details are unavailable right now."
+      },
+      "reachability": {
+        "label": "Connection",
+        "online": "Online",
+        "offline": "Offline",
+        "unknown": "Unknown"
+      },
+      "groupRelationship": {
+        "label": "Space",
+        "consistent": "Current space",
+        "pendingLocalDecision": "Waiting for your choice",
+        "diverged": "Different space",
+        "unverifiable": "Cannot verify",
+        "unknown": "Unknown"
+      },
+      "syncRelationship": {
+        "label": "Sync",
+        "usable": "Available",
+        "waitingForLocalDecision": "Waiting for your choice",
+        "pausedGroupDiverged": "Stopped for a different space",
+        "pausedUpgradeRequired": "Paused until update",
+        "pausedUnverifiable": "Paused while details are checked",
+        "removedLocalDevice": "This device left",
+        "removedPeerDevice": "Device removed",
+        "unknown": "Unknown"
+      },
+      "compatibility": {
+        "label": "Version",
+        "compatible": "Compatible",
+        "upgradeRequired": "Update required",
+        "unknown": "Unknown"
+      }
+    },
+    "operation": {
+      "title": {
+        "removeMember": "Device removed",
+        "applyChange": "Device change applied",
+        "keepCurrentSpace": "Current space kept",
+        "leaveSpace": "Space left",
+        "stateChanged": "Space status changed"
+      },
+      "outcome": {
+        "stateChanged": "The space changed before this choice was saved. The current result is shown below.",
+        "alreadyCompleted": "This change was already handled elsewhere. The result that actually completed is shown below."
+      },
+      "none": "None",
+      "verified": "The latest device state has been verified.",
+      "unverified": "The change was accepted, but the latest device details cannot be verified yet.",
+      "localStatus": {
+        "inSpace": "This device is still in the original space.",
+        "leftSpace": "This device has left the original space. Local history is still available."
+      },
+      "usable": "Can continue syncing: {{devices}}",
+      "separated": "No longer syncing together: {{devices}}",
+      "continuing": "Still in the original space: {{devices}}",
+      "offlinePending": "Some devices are offline. Their final delivery status is not being claimed yet.",
+      "done": "Done"
+    },
+    "deviceTrust": {
+      "title": "Choose which devices this phone syncs with",
+      "body": "{{source}} proposed an updated device list. Choose which list to use.",
+      "sheetTitle": "Sync devices",
+      "sheetBody": "{{source}} updated the device list. Choose which devices this phone should sync with.",
+      "targets": "Devices affected: {{devices}}",
+      "apply": "Use {{source}}'s device list",
+      "leave": "Use {{source}}'s list and stop syncing this phone",
+      "keep": "This phone's device list",
+      "continues": "Syncs with: {{devices}}",
+      "continuesSummary": "Devices that will keep syncing: {{count}}",
+      "stops": "Will stop syncing with: {{devices}}",
+      "requiresRejoin": "A new invitation will be needed to sync again: {{devices}}",
+      "changesTitle": "What will change",
+      "noStops": "No devices will stop syncing.",
+      "none": "None",
+      "confirmKeepTitle": "These devices will stop syncing with this phone",
+      "confirmKeepBody": "After keeping the current list, the devices below will need a new invitation to sync again.",
+      "confirmLeaveTitle": "This phone will stop syncing",
+      "confirmLeaveBody": "This phone will no longer sync with the current device list. Local history will remain on this phone.",
+      "confirmStopTitle": "These devices will stop syncing",
+      "confirmStopBody": "After confirmation, the devices below will stop syncing with this phone. A new invitation will be needed to sync again.",
+      "confirm": "Confirm",
+      "continue": "Continue",
+      "chooseAction": "Choose a device list",
+      "applyAction": "Use {{source}}'s list",
+      "keepAction": "Keep current list",
+      "reviewStopAction": "Review devices that will stop syncing",
+      "reviewLeaveAction": "Review exit impact",
+      "confirmKeepAction": "Keep current list and stop syncing",
+      "confirmStopAction": "Confirm and stop syncing",
+      "confirmLeaveAction": "Stop syncing this phone",
+      "notificationTitle": "Review a device change",
+      "notificationBody": "Open UniClip to review which devices can continue syncing.",
+      "notificationReviewTitle": "Review a device change",
+      "notificationReviewBody": "Open UniClip to choose which devices can continue syncing.",
+      "notificationUpgradeTitle": "A device needs an update",
+      "notificationUpgradeBody": "Open UniClip to review the current space status.",
+      "notificationUnverifiableTitle": "Device details need attention",
+      "notificationUnverifiableBody": "Open UniClip to review the current space status.",
+      "notificationChannel": "Device changes",
+      "stateChanged": "The device state changed. Review the latest result.",
+      "error": "The choice could not be saved. The latest device state is shown; try again.",
+      "status": {
+        "waitingForLocalDecision": "Waiting for your choice",
+        "unverifiable": "Device details cannot be verified",
+        "upgradeRequired": "Update required",
+        "updating": "Updating space",
+        "differentSpace": "Different space",
+        "removed": "Removed",
+        "usable": "Available",
+        "unknown": "Status unavailable"
+      }
+    },
+    "convergence": {
+      "title": "Sync status",
+      "waiting": "Waiting for devices in this space to finish syncing.",
+      "pendingDevice": "Sync pending",
+      "recoveryRequired": "Sync needs recovery. Wait for the device to reconnect.",
+      "complete": "Devices in this space have finished syncing."
+    },
+    "leave": {
+      "action": "Leave space",
+      "confirm": "Only this phone will leave; the other devices will continue using the original space. Local history will remain, and a new invitation will be required to join again."
+    },
+    "switch": {
+      "title": "Switch space",
+      "description": "Use an invitation code to join another space",
+      "unavailable": "Device details cannot be verified yet, so switching spaces is unavailable. Try again later.",
+      "confirmTitle": "Switch space",
+      "confirm": "This device will leave the current space and join a new one. Your local history will stay, and it will only sync with the new space.",
+      "confirmAction": "Switch space"
+    },
+    "unreadableHistory": {
+      "title": "Some local history can't be opened",
+      "body": "Those items will remain encrypted on this device but won't be available. The rest of your history will move to the new space. Continue?",
+      "continue": "Keep and continue"
+    },
+    "error": {
+      "title": "Space needs attention",
+      "deviceNameRequired": "Enter a device name",
+      "passphraseRequired": "Enter the space passphrase",
+      "invitationCodeRequired": "Enter an invitation code",
+      "invitationCodeInvalid": "Enter all 8 invitation characters",
+      "invitationNotFound": "This invitation code does not exist",
+      "invitationExpired": "This invitation has expired. Ask for a new one",
+      "passphraseMismatch": "The space passphrase is incorrect",
+      "sponsorUnreachable": "The other device cannot be reached right now",
+      "connectionTimedOut": "The connection timed out. Try again",
+      "invitationRejected": "The other device did not accept this invitation",
+      "serviceUnavailable": "The connection service is unavailable. Try again later",
+      "connectionLost": "The connection was interrupted. Try again",
+      "operationFailed": "The operation failed. Check your input and try again."
+    },
+    "manage": { "title": "Space actions" },
+    "advanced": { "title": "Advanced" },
+    "danger": { "title": "Danger zone" }
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "appearance": {
+    "sectionTitle": "Appearance",
+    "mode": {
+      "label": "Appearance mode",
+      "system": "Follow system",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "hideFromRecents": {
+      "title": "Hide from recent tasks",
+      "desc": "Lock before hiding to avoid being cleared in one tap"
+    },
+    "modeChangeFailed": "Failed to change appearance mode",
+    "updateFailed": "Update failed"
+  },
+  "general": {
+    "sectionTitle": "General",
+    "theme": "Theme"
+  },
+  "category": {
+    "sync": "Sync",
+    "about": "About",
+    "other": "Other",
+    "storage": "Storage",
+    "history": "History",
+    "background": "Background",
+    "developer": "Developer options",
+    "extensions": "Extensions & permissions"
+  },
+  "hub": {
+    "clipboardSync": {
+      "title": "Clipboard sync",
+      "autoApply": {
+        "title": "Auto-write to clipboard",
+        "desc": "When new content arrives from your space, write it to this device clipboard automatically"
+      },
+      "autoPush": {
+        "title": "Auto-push clipboard",
+        "desc": "When you copy or use a history item, send it to the other devices in your space automatically"
+      },
+      "footer": "These options control sync direction; Background settings control where it can run",
+      "updateFailed": "Update failed"
+    },
+    "rows": {},
+    "summary": {
+      "history": "Keep up to {{count}} items",
+      "backgroundTempDisabled": "Temporarily stopped, resumes after restart",
+      "backgroundOn": "Background tasks on",
+      "backgroundOff": "Background tasks off",
+      "storage": "Cache, logs and history usage",
+      "about": "Version {{version}}",
+      "developer": "Logs, debugging and shortcuts"
+    }
+  },
+  "ios": {
+    "sync": {
+      "footer": "When Auto-write is on, new content from your space is written to this device clipboard immediately; when off, it is only highlighted on Home.",
+      "autoApply": "Auto-write to clipboard",
+      "autoPush": "Auto-push clipboard",
+      "sse": "Live push (SSE)"
+    },
+    "extensions": {
+      "footer": "The keyboard and share extensions let you use UniClip directly in other apps; set clipboard access to Allow to avoid repeated prompts during sync.",
+      "keyboard": "Keyboard",
+      "share": "Share",
+      "clipboardAccess": "Clipboard access"
+    },
+    "keyboardHint": {
+      "needsFullAccess": "Needs full access",
+      "notEnabled": "Not enabled"
+    },
+    "general": {
+      "checkUpdateOnLaunch": "Check for updates on launch"
+    },
+    "about": {
+      "projectHome": "Project home",
+      "version": "Version"
+    }
+  },
+  "openSystemSettings": "Open system settings",
+  "analytics": {
+    "sectionTitle": "Privacy",
+    "consentTitle": "Share anonymous usage statistics",
+    "consentDescription": "Helps improve UniClip without collecting clipboard contents or names",
+    "footer": "App version, system, region, session, device count, and anonymous space grouping may be sent.",
+    "reset": "Reset",
+    "resetTitle": "Reset statistics identity",
+    "resetMessage": "This removes pending statistics and creates a new anonymous identity.",
+    "resetConfirm": "Reset identity",
+    "resetDone": "Statistics identity reset",
+    "error": "Could not update statistics settings"
+  }
+}

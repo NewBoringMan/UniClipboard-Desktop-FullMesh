@@ -1,0 +1,1218 @@
+//! Outbound clipboard dispatch, delivery views, and receive cancellation.
+//! The complete inbound receive lifecycle is owned separately by
+//! `ClipboardInboundRuntime`.
+
+use std::sync::Arc;
+use std::time::Instant;
+
+use bytes::Bytes;
+use tracing::instrument;
+
+use uc_core::ids::{DeviceId, EntryId};
+use uc_core::membership::{ContentExchangeGatePort, CurrentWorkspacePeerScopePort};
+use uc_core::ports::security::TransferCipherPort;
+use uc_core::ports::{
+    CancelDirectoryAttemptTransfersPort, CleanupDirectoryStagingPort, ClipboardDispatchPort,
+    ClipboardHeader, ClockPort, CommitInboundReceivePort, DeviceIdentityPort, DispatchAck,
+    EntryDeliveryRepositoryPort, FindMobileDeviceByIdPort, FirstSyncStatePort,
+    GetDirectoryPublishRecordPort, GetEntryAttemptPort, GetEntryReceiveProgressPort,
+    ListNonTerminalAttemptsPort, LocalIdentityPort, PeerAddressRepositoryPort, PresencePort,
+    RequestReceiveCancellationPort, SettingsPort,
+};
+use uc_core::MemberRepositoryPort;
+use uc_core::{
+    ClipboardChangeOrigin, ClipboardMimeRepresentation, ClipboardPayloadReference,
+    SystemClipboardSnapshot,
+};
+use uc_observability_contract::analytics::AnalyticsPort;
+
+use crate::clipboard::sync::dispatch_entry::DispatchEntryRunner;
+use crate::clipboard::sync::get_entry_delivery_view::{
+    EntryDeliveryView, GetEntryDeliveryViewError, GetEntryDeliveryViewUseCase,
+};
+use crate::clipboard::sync::payload_codec::{
+    encode_snapshot_with_blob_refs_to_v3_bytes, V3BlobRef,
+};
+use crate::clipboard::sync::{
+    encode_snapshot_to_v3_bytes, DispatchClipboardEntryInput, DispatchClipboardEntryUseCase,
+    DispatchOutcome, DispatchPerTarget, DispatchSyncError,
+};
+use crate::facade::blob_transfer::{BlobTransferFacade, SharedHostEventEmitter};
+use crate::facade::clipboard::cancel_entry_receive::{
+    CancelEntryReceiveError, CancelEntryReceiveOutcome, CancelEntryReceiveUseCase,
+};
+use uc_core::clipboard::ClipboardContentCategorySet;
+use uc_core::ports::clipboard::GetClipboardEntryPort;
+use uc_core::ports::ClipboardEventRepositoryPort;
+use uc_core::trusted_peer::TrustedPeerRepositoryPort;
+
+/// Construction bundle, mirrors `MemberRosterDeps` pattern so bootstrap
+/// wiring stays consistent across facades.
+pub struct ClipboardSyncDeps {
+    pub peer_addr_repo: Arc<dyn PeerAddressRepositoryPort>,
+    pub member_repo: Arc<dyn MemberRepositoryPort>,
+    /// 已保存成员移除意图对发送路径的硬限制。
+    pub removal_gate: Arc<dyn ContentExchangeGatePort>,
+    pub peer_scope: Arc<dyn CurrentWorkspacePeerScopePort>,
+    pub presence: Arc<dyn PresencePort>,
+    pub transfer_cipher: Arc<dyn TransferCipherPort>,
+    pub mailbox: Option<Arc<dyn uc_core::ports::ClipboardMailboxPort>>,
+    pub clipboard_dispatch: Arc<dyn ClipboardDispatchPort>,
+    pub device_identity: Arc<dyn DeviceIdentityPort>,
+    pub local_identity: Arc<dyn LocalIdentityPort>,
+    pub settings: Arc<dyn SettingsPort>,
+    pub clock: Arc<dyn ClockPort>,
+    /// Slice 8c-1 · per-peer outbound `sync_attempted` /
+    /// `sync_succeeded` / `sync_failed` events fire from the dispatch
+    /// use case. Inbound events (Slice 8c later) will plug here too.
+    pub analytics: Arc<dyn AnalyticsPort>,
+    /// Slice 8c-2 · first-sync funnel dedup port. dispatch use case
+    /// 在 spawn 内 mark + 条件 fire `first_clipboard_sync_attempted` /
+    /// `first_clipboard_sync_succeeded` / `first_file_sync_succeeded`。
+    pub first_sync_state: Arc<dyn FirstSyncStatePort>,
+    /// fan-out 完成后,按每个对端的结果落盘 delivery 记录;只有 entry_id
+    /// 关联的发送路径(LocalCapture → outbound)才会触发实际写入,CLI /
+    /// 测试路径走 entry_id=None 时本端口空跑。
+    pub entry_delivery_repo: Arc<dyn EntryDeliveryRepositoryPort>,
+    /// `get_entry_delivery_view` 拼装视图时需要 entry / event / trusted_peer:
+    /// entry 验存在 + 取 delivery_tracked,event 反查来源设备,trusted_peer
+    /// 与 `peer_scope` 取交集后用于合成 Pending。
+    pub entry_repo: Arc<dyn GetClipboardEntryPort>,
+    pub event_repo: Arc<dyn ClipboardEventRepositoryPort>,
+    pub trusted_peer_repo: Arc<dyn TrustedPeerRepositoryPort>,
+    /// 移动设备仓库,`GetEntryDeliveryViewUseCase` 用于把 `mobile_sync:` 前缀
+    /// 的伪 DeviceId 解析为移动设备的人类可读 label。
+    pub mobile_device_repo: Arc<dyn FindMobileDeviceByIdPort>,
+    /// 共享 host-event bus。dispatch fan-out 完成、delivery 状态写入后追发
+    /// 一条 `HostEvent::Delivery::StatusChanged`,GUI 前端凭此实时刷新 badge。
+    /// 测试 / CLI 装配传一根空 bus(`Arc::new(HostEventBus::new())`)即可
+    /// —— 无下游 = noop,行为等价于原来的 `None`。
+    pub host_event_bus: SharedHostEventEmitter,
+}
+
+/// Public-facing input to a dispatch pass. Mirrors the use case's own
+/// struct but lives in the facade layer for stability.
+#[derive(Debug, Clone)]
+pub struct DispatchEntryInput {
+    pub plaintext: Bytes,
+    pub snapshot_hash: String,
+    pub payload_version: u8,
+    /// Optional explicit recipient list. `Some(list)` restricts fan-out to
+    /// the intersection of `trusted_peer` ∧ `list`; `None` falls back to
+    /// "all trusted peers" (the existing default). `Some(vec![])` is
+    /// legal — it means "no targets" and produces an empty outcome
+    /// (still runs encrypt so callers see a well-formed report).
+    ///
+    /// **Iron rule**: this filter narrows candidates only. It does NOT
+    /// bypass `is_send_allowed` / member gating / presence — those checks
+    /// still apply per peer (see `dispatch_entry.rs` module doc).
+    pub target_filter: Option<Vec<DeviceId>>,
+}
+
+/// Public-facing per-target report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchEntryPerTarget {
+    pub device_id: DeviceId,
+    pub outcome: Result<DispatchAck, String>,
+}
+
+/// Public-facing aggregate report. Counts + per-target detail, mirroring
+/// the internal `DispatchOutcome`.
+///
+/// `total_pending` counts peers whose result the main flow did not wait for
+/// because the fan-out deadline was hit; their delivery records will be
+/// written by a background continuation. They are NOT present in `per_target`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchEntryOutcome {
+    pub snapshot_hash: String,
+    pub per_target: Vec<DispatchEntryPerTarget>,
+    pub total_accepted: usize,
+    pub total_duplicate: usize,
+    pub total_offline: usize,
+    pub total_errored: usize,
+    pub total_pending: usize,
+    pub pending_targets: Vec<DeviceId>,
+    pub at_ms: i64,
+}
+
+/// Public-facing error type. Collapses the internal variants onto the
+/// subset meaningful to external callers.
+#[derive(Debug, thiserror::Error)]
+pub enum ClipboardSyncError {
+    #[error("encryption session not unlocked")]
+    LockedSpace,
+    #[error("transfer cipher failure: {0}")]
+    CipherFailure(String),
+    #[error("peer address repository: {0}")]
+    Repository(String),
+}
+
+impl From<DispatchSyncError> for ClipboardSyncError {
+    fn from(err: DispatchSyncError) -> Self {
+        match err {
+            DispatchSyncError::LockedSpace => ClipboardSyncError::LockedSpace,
+            DispatchSyncError::CipherFailure(msg) => ClipboardSyncError::CipherFailure(msg),
+            DispatchSyncError::Repository(msg) => ClipboardSyncError::Repository(msg),
+        }
+    }
+}
+
+/// Clipboard sync facade for outbound and receive-management commands.
+pub struct ClipboardSyncFacade {
+    dispatch_uc: Arc<DispatchClipboardEntryUseCase>,
+    view_uc: Arc<GetEntryDeliveryViewUseCase>,
+    cancel_entry_receive_uc: Option<Arc<CancelEntryReceiveUseCase>>,
+    receive_progress: Option<Arc<dyn GetEntryReceiveProgressPort>>,
+    list_receive_attempts: Option<Arc<dyn ListNonTerminalAttemptsPort>>,
+    host_event_bus: Arc<crate::facade::HostEventBus>,
+}
+
+#[derive(Clone, Copy)]
+struct DispatchVersions {
+    payload: u8,
+    wire: u8,
+}
+
+pub(crate) struct ClipboardSyncDispatch<'a> {
+    facade: &'a ClipboardSyncFacade,
+    source_started_at: Option<Instant>,
+}
+
+impl ClipboardSyncFacade {
+    /// Reclaim the areas where interrupted directory receives were being
+    /// assembled, and report how many were removed.
+    ///
+    /// Only the directories in `dirs` are searched; an area under a folder the
+    /// user has since stopped using is not reachable from here.
+    ///
+    /// Associated rather than a method, and deliberately so: this must run
+    /// while nothing can be receiving, which is before this facade's own
+    /// dependencies — the network stack among them — exist. Binding it to an
+    /// instance would push the sweep past the point where a peer can already
+    /// be pushing into the very area being swept.
+    ///
+    /// Governance only: nothing here is fatal. A leftover area costs disk
+    /// space, not correctness, since no entry refers to it.
+    pub async fn sweep_orphaned_inbound_staging(dirs: &[std::path::PathBuf]) -> usize {
+        crate::clipboard::sync::sweep_inbound_staging(dirs).await
+    }
+
+    pub fn new(deps: ClipboardSyncDeps) -> Self {
+        let dispatch_uc = DispatchClipboardEntryUseCase::new_with_removal_gate(
+            Arc::clone(&deps.peer_addr_repo),
+            Arc::clone(&deps.member_repo),
+            Arc::clone(&deps.presence),
+            Arc::clone(&deps.transfer_cipher),
+            Arc::clone(&deps.clipboard_dispatch),
+            Arc::clone(&deps.device_identity),
+            Arc::clone(&deps.local_identity),
+            Arc::clone(&deps.settings),
+            Arc::clone(&deps.clock),
+            Arc::clone(&deps.analytics),
+            Arc::clone(&deps.first_sync_state),
+            Arc::clone(&deps.entry_delivery_repo),
+            Arc::clone(&deps.host_event_bus),
+            Arc::clone(&deps.removal_gate),
+            Arc::clone(&deps.peer_scope),
+        );
+        let dispatch_uc = dispatch_uc.with_event_repository(Arc::clone(&deps.event_repo));
+        let dispatch_uc = if let Some(mailbox) = deps.mailbox.clone() {
+            dispatch_uc.with_mailbox(mailbox)
+        } else {
+            dispatch_uc
+        };
+        let dispatch_uc = Arc::new(dispatch_uc);
+        let view_uc = Arc::new(GetEntryDeliveryViewUseCase::new(
+            Arc::clone(&deps.entry_repo),
+            Arc::clone(&deps.event_repo),
+            Arc::clone(&deps.trusted_peer_repo),
+            Arc::clone(&deps.peer_scope),
+            Arc::clone(&deps.entry_delivery_repo),
+            Arc::clone(&deps.device_identity),
+            Arc::clone(&deps.member_repo),
+            Arc::clone(&deps.mobile_device_repo),
+        ));
+        Self {
+            dispatch_uc,
+            view_uc,
+            cancel_entry_receive_uc: None,
+            receive_progress: None,
+            list_receive_attempts: None,
+            host_event_bus: deps.host_event_bus.clone(),
+        }
+    }
+
+    pub(crate) fn dispatch_context(
+        &self,
+        source_started_at: Option<Instant>,
+    ) -> ClipboardSyncDispatch<'_> {
+        ClipboardSyncDispatch {
+            facade: self,
+            source_started_at,
+        }
+    }
+
+    pub fn with_entry_receive_cancellation(
+        mut self,
+        get_attempt: Arc<dyn GetEntryAttemptPort>,
+        request_cancel: Arc<dyn RequestReceiveCancellationPort>,
+        progress: Arc<dyn GetEntryReceiveProgressPort>,
+        list_attempts: Arc<dyn ListNonTerminalAttemptsPort>,
+        commit_inbound: Arc<dyn CommitInboundReceivePort>,
+        get_publish: Arc<dyn GetDirectoryPublishRecordPort>,
+        staging_cleanup: Arc<dyn CleanupDirectoryStagingPort>,
+        cancel_projection: Arc<dyn CancelDirectoryAttemptTransfersPort>,
+        blob_transfer: Arc<BlobTransferFacade>,
+        clock: Arc<dyn ClockPort>,
+    ) -> Self {
+        self.receive_progress = Some(progress.clone());
+        self.list_receive_attempts = Some(list_attempts);
+        self.cancel_entry_receive_uc = Some(Arc::new(CancelEntryReceiveUseCase::new(
+            get_attempt,
+            request_cancel,
+            commit_inbound,
+            get_publish,
+            staging_cleanup,
+            cancel_projection,
+            blob_transfer,
+            clock,
+            self.host_event_bus.clone(),
+        )));
+        self
+    }
+
+    pub async fn get_entry_receive_progress(
+        &self,
+        entry_id: &EntryId,
+    ) -> Result<Option<uc_core::ports::EntryReceiveProgress>, CancelEntryReceiveError> {
+        let progress = self
+            .receive_progress
+            .as_ref()
+            .ok_or(CancelEntryReceiveError::Unavailable)?;
+        progress
+            .get_entry_receive_progress(entry_id.as_ref())
+            .await
+            .map_err(|error| CancelEntryReceiveError::Attempt(error.to_string()))
+    }
+
+    pub async fn list_entry_receive_progress(
+        &self,
+    ) -> Result<Vec<uc_core::ports::EntryReceiveProgress>, CancelEntryReceiveError> {
+        let attempts = self
+            .list_receive_attempts
+            .as_ref()
+            .ok_or(CancelEntryReceiveError::Unavailable)?
+            .list_non_terminal_attempts()
+            .await
+            .map_err(|error| CancelEntryReceiveError::Attempt(error.to_string()))?;
+        let progress = self
+            .receive_progress
+            .as_ref()
+            .ok_or(CancelEntryReceiveError::Unavailable)?;
+        let mut result = Vec::with_capacity(attempts.len());
+        for attempt in attempts {
+            if let Some(current) = progress
+                .get_entry_receive_progress(&attempt.entry_id)
+                .await
+                .map_err(|error| CancelEntryReceiveError::Attempt(error.to_string()))?
+            {
+                result.push(current);
+            }
+        }
+        Ok(result)
+    }
+
+    pub async fn cancel_entry_receive(
+        &self,
+        entry_id: &EntryId,
+        expected_attempt_id: &str,
+    ) -> Result<CancelEntryReceiveOutcome, CancelEntryReceiveError> {
+        let use_case = self
+            .cancel_entry_receive_uc
+            .as_ref()
+            .ok_or(CancelEntryReceiveError::Unavailable)?;
+        use_case.execute(entry_id, expected_attempt_id).await
+    }
+
+    /// 拿一条 entry 对每个可信对端的同步状态视图。详见
+    /// [`GetEntryDeliveryViewUseCase::execute`] 的契约说明。
+    pub async fn get_entry_delivery_view(
+        &self,
+        entry_id: &EntryId,
+    ) -> Result<EntryDeliveryView, GetEntryDeliveryViewError> {
+        self.view_uc.execute(entry_id).await
+    }
+
+    /// Fan out one plaintext payload to every online paired peer.
+    ///
+    /// Phase 2 / CLI / test entry point — caller has already encoded the
+    /// payload and computed `snapshot_hash`. The per-device
+    /// `send_content_types` filter is bypassed here (empty
+    /// `ClipboardContentCategorySet`, fail open) because raw-bytes callers
+    /// don't carry the snapshot structure needed to classify; daemon goes through
+    /// [`Self::dispatch_snapshot`] / [`Self::dispatch_snapshot_with_blob_refs`]
+    /// which preserve the snapshot and apply the filter.
+    #[instrument(skip_all, fields(snapshot_hash = %input.snapshot_hash))]
+    pub async fn dispatch_entry(
+        &self,
+        input: DispatchEntryInput,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        let plaintext_size = input.plaintext.len();
+        let internal = self
+            .dispatch_uc
+            .execute(DispatchClipboardEntryInput {
+                plaintext: input.plaintext,
+                snapshot_hash: input.snapshot_hash.clone(),
+                payload_version: input.payload_version,
+                wire_version: ClipboardHeader::CURRENT_VERSION,
+                categories: ClipboardContentCategorySet::empty(),
+                // raw-bytes 路径不与某条 entry 绑定,跳过 delivery 落盘。
+                entry_id: None,
+                target_filter: input.target_filter,
+                source_started_at: None,
+                mime_representations: vec![ClipboardMimeRepresentation {
+                    mime_type: "application/octet-stream".to_owned(),
+                    size_bytes: u64::try_from(plaintext_size).unwrap_or(u64::MAX),
+                }],
+                payload_references: vec![],
+            })
+            .await?;
+        Ok(lift_outcome(internal))
+    }
+
+    /// Internal helper used by snapshot-aware dispatch entry points to
+    /// thread the snapshot's content category set into the gate.
+    /// Public callers go through `dispatch_entry` (empty set, fail open)
+    /// or `dispatch_snapshot*` (set computed from the snapshot reps).
+    async fn dispatch_internal(
+        &self,
+        plaintext: Bytes,
+        snapshot_hash: String,
+        versions: DispatchVersions,
+        categories: ClipboardContentCategorySet,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+        source_started_at: Option<Instant>,
+        mime_representations: Vec<ClipboardMimeRepresentation>,
+        payload_references: Vec<ClipboardPayloadReference>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        let internal = self
+            .dispatch_uc
+            .execute(DispatchClipboardEntryInput {
+                plaintext,
+                snapshot_hash,
+                payload_version: versions.payload,
+                wire_version: versions.wire,
+                categories,
+                entry_id,
+                target_filter,
+                source_started_at,
+                mime_representations,
+                payload_references,
+            })
+            .await?;
+        Ok(lift_outcome(internal))
+    }
+
+    /// Phase 3 daemon entry point — encode `snapshot` into the V3
+    /// envelope + compute the canonical `snapshot_hash` (matches the
+    /// `clipboard_event.snapshot_hash` column on receiver-side dedup),
+    /// then dispatch.
+    ///
+    /// The `origin` parameter is passive metadata for tracing /
+    /// telemetry; gating callers (e.g. daemon `clipboard_watcher`) are
+    /// expected to short-circuit on `RemotePush` _before_ calling this
+    /// method, so the facade does not enforce a guard here. Centralising
+    /// the encode keeps daemon + future Tauri / CLI snapshot-aware
+    /// senders from re-implementing the V3 codec independently.
+    #[instrument(skip_all, fields(rep_count = snapshot.representations.len(), origin = ?origin))]
+    pub async fn dispatch_snapshot(
+        &self,
+        snapshot: SystemClipboardSnapshot,
+        origin: ClipboardChangeOrigin,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        self.dispatch_context(None)
+            .dispatch_snapshot(snapshot, origin, entry_id, target_filter)
+            .await
+    }
+
+    /// 编码并发送带 Slice 3 blob 引用的剪贴板快照。
+    ///
+    /// 普通小 payload 仍在 V3 本体里;大文件内容通过 `blob_refs` 让接收端
+    /// 拉取并改写成本机 file-list。
+    #[instrument(skip_all, fields(rep_count = snapshot.representations.len(), blob_ref_count = blob_refs.len(), origin = ?origin))]
+    pub async fn dispatch_snapshot_with_blob_refs(
+        &self,
+        snapshot: SystemClipboardSnapshot,
+        blob_refs: Vec<V3BlobRef>,
+        origin: ClipboardChangeOrigin,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        self.dispatch_context(None)
+            .dispatch_snapshot_with_blob_refs(snapshot, blob_refs, origin, entry_id, target_filter)
+            .await
+    }
+
+    /// 编码并发送带目录成员清单的剪贴板快照。
+    ///
+    /// 与 [`Self::dispatch_snapshot_with_blob_refs`] 相同,但额外携带
+    /// `manifest` 让接收端能原子重建目录树,因此走 `DIRECTORY_VERSION` wire。
+    #[instrument(skip_all, fields(rep_count = snapshot.representations.len(), blob_ref_count = blob_refs.len(), member_count = manifest.members.len(), origin = ?origin))]
+    pub async fn dispatch_snapshot_with_blob_refs_and_file_set(
+        &self,
+        snapshot: SystemClipboardSnapshot,
+        blob_refs: Vec<V3BlobRef>,
+        manifest: crate::clipboard::sync::apply_inbound::InboundFileSetManifest,
+        origin: ClipboardChangeOrigin,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        self.dispatch_context(None)
+            .dispatch_snapshot_with_blob_refs_and_file_set(
+                snapshot,
+                blob_refs,
+                manifest,
+                origin,
+                entry_id,
+                target_filter,
+            )
+            .await
+    }
+
+    /// Crate-internal accessor — hand the inner dispatch use case to
+    /// callers that need to feed `DispatchClipboardEntryInput` directly
+    /// (currently only [`ResendEntryUseCase`] via
+    /// [`ClipboardOutboundFacade`]). The blanket impl
+    /// `DispatchEntryRunner for DispatchClipboardEntryUseCase` provides
+    /// the trait-object handle without exposing the concrete use case
+    /// across the crate boundary.
+    pub(crate) fn dispatch_runner(&self) -> Arc<dyn DispatchEntryRunner> {
+        Arc::clone(&self.dispatch_uc) as Arc<dyn DispatchEntryRunner>
+    }
+}
+
+impl ClipboardSyncDispatch<'_> {
+    pub(crate) async fn dispatch_snapshot(
+        &self,
+        snapshot: SystemClipboardSnapshot,
+        origin: ClipboardChangeOrigin,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        let _ = origin; // span metadata only (see facade documentation)
+        let categories = ClipboardContentCategorySet::from_snapshot(&snapshot);
+        let mime_representations = fullmesh_mime_representations(&snapshot);
+        let (plaintext, snapshot_hash) = encode_snapshot_to_v3_bytes(&snapshot)
+            .map_err(|e| ClipboardSyncError::CipherFailure(format!("payload encode: {e}")))?;
+        self.facade
+            .dispatch_internal(
+                plaintext,
+                snapshot_hash,
+                DispatchVersions {
+                    payload: 3,
+                    wire: ClipboardHeader::CURRENT_VERSION,
+                },
+                categories,
+                entry_id,
+                target_filter,
+                self.source_started_at,
+                mime_representations,
+                vec![],
+            )
+            .await
+    }
+
+    pub(crate) async fn dispatch_snapshot_with_blob_refs(
+        &self,
+        snapshot: SystemClipboardSnapshot,
+        blob_refs: Vec<V3BlobRef>,
+        origin: ClipboardChangeOrigin,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        let _ = origin;
+        let categories = ClipboardContentCategorySet::from_snapshot(&snapshot);
+        let mime_representations = fullmesh_mime_representations(&snapshot);
+        let payload_references = fullmesh_payload_references(&blob_refs);
+        let (plaintext, snapshot_hash) =
+            encode_snapshot_with_blob_refs_to_v3_bytes(&snapshot, &blob_refs)
+                .map_err(|e| ClipboardSyncError::CipherFailure(format!("payload encode: {e}")))?;
+        self.facade
+            .dispatch_internal(
+                plaintext,
+                snapshot_hash,
+                DispatchVersions {
+                    payload: 3,
+                    wire: ClipboardHeader::CURRENT_VERSION,
+                },
+                categories,
+                entry_id,
+                target_filter,
+                self.source_started_at,
+                mime_representations,
+                payload_references,
+            )
+            .await
+    }
+
+    pub(crate) async fn dispatch_snapshot_with_blob_refs_and_file_set(
+        &self,
+        snapshot: SystemClipboardSnapshot,
+        blob_refs: Vec<V3BlobRef>,
+        manifest: crate::clipboard::sync::apply_inbound::InboundFileSetManifest,
+        origin: ClipboardChangeOrigin,
+        entry_id: Option<EntryId>,
+        target_filter: Option<Vec<DeviceId>>,
+    ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
+        let _ = origin; // span metadata only (see sibling dispatch methods)
+        let categories = ClipboardContentCategorySet::from_snapshot(&snapshot);
+        let mime_representations = fullmesh_mime_representations(&snapshot);
+        let payload_references = fullmesh_payload_references(&blob_refs);
+        let (plaintext, snapshot_hash) =
+            crate::clipboard::sync::payload_codec::encode_snapshot_with_blob_refs_and_file_set_to_v3_bytes(
+                &snapshot,
+                &blob_refs,
+                &manifest,
+            )
+            .map_err(|e| ClipboardSyncError::CipherFailure(format!("payload encode: {e}")))?;
+        self.facade
+            .dispatch_internal(
+                plaintext,
+                snapshot_hash,
+                DispatchVersions {
+                    payload: 3,
+                    wire: ClipboardHeader::DIRECTORY_VERSION,
+                },
+                categories,
+                entry_id,
+                target_filter,
+                self.source_started_at,
+                mime_representations,
+                payload_references,
+            )
+            .await
+    }
+}
+
+fn fullmesh_mime_representations(
+    snapshot: &SystemClipboardSnapshot,
+) -> Vec<ClipboardMimeRepresentation> {
+    snapshot
+        .representations
+        .iter()
+        .map(|representation| ClipboardMimeRepresentation {
+            mime_type: representation
+                .mime
+                .as_ref()
+                .map(|mime| mime.as_str().to_owned())
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+            size_bytes: u64::try_from(representation.size_bytes()).unwrap_or_default(),
+        })
+        .collect()
+}
+
+fn fullmesh_payload_references(blob_refs: &[V3BlobRef]) -> Vec<ClipboardPayloadReference> {
+    blob_refs
+        .iter()
+        .map(|reference| ClipboardPayloadReference {
+            blob_id: hex::encode(reference.ticket.as_bytes()),
+            content_hash: None,
+            size_bytes: reference.size_bytes,
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Private mappers — keep internal / public types pinned together.
+// ---------------------------------------------------------------------------
+
+fn lift_outcome(internal: DispatchOutcome) -> DispatchEntryOutcome {
+    DispatchEntryOutcome {
+        snapshot_hash: internal.snapshot_hash,
+        per_target: internal
+            .per_target
+            .into_iter()
+            .map(lift_per_target)
+            .collect(),
+        total_accepted: internal.total_accepted,
+        total_duplicate: internal.total_duplicate,
+        total_offline: internal.total_offline,
+        total_errored: internal.total_errored,
+        total_pending: internal.total_pending,
+        pending_targets: internal.pending_targets,
+        at_ms: internal.at_ms,
+    }
+}
+
+fn lift_per_target(internal: DispatchPerTarget) -> DispatchEntryPerTarget {
+    DispatchEntryPerTarget {
+        device_id: internal.device_id,
+        outcome: internal.outcome,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+//
+// **Mocking convention** (consistent with `usecases::clipboard_sync::*::tests`):
+//
+// * Use `mockall::mock!` for ports asserted via call counts + return
+//   values: `PeerAddressRepositoryPort`, `TransferCipherPort`,
+//   `ClipboardDispatchPort`, `PresencePort`, `DeviceIdentityPort`,
+//   `LocalIdentityPort`, `SettingsPort`.
+// * Trivial sync `FixedClock` stays hand-written (4 lines).
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use async_trait::async_trait;
+    use mockall::predicate::*;
+    use tokio::sync::broadcast;
+    use uc_core::ports::security::TransferCipherError;
+    use uc_core::ports::{
+        ClipboardDispatchError, ClipboardHeader, ConnectionChannel, DispatchAck, DispatchReport,
+        FirstSyncStateError, LocalIdentityError, PeerAddressError, PeerAddressRecord,
+        PresenceError, PresenceEvent, ReachabilityState, SyncPayload,
+    };
+    use uc_core::security::IdentityFingerprint;
+    use uc_core::settings::model::Settings;
+    use uc_core::{MemberSyncPreferences, MembershipError, SpaceMember};
+
+    /// Slice 8c-2 · facade 内测不验证 first-sync 漏斗事件——给个永远返回
+    /// `Ok(false)` 的 noop fake，避免 sync 三事件断言被 first_* 污染。
+    struct NoopFirstSyncState;
+    #[async_trait]
+    impl FirstSyncStatePort for NoopFirstSyncState {
+        async fn mark_first_sync_attempted(&self) -> Result<bool, FirstSyncStateError> {
+            Ok(false)
+        }
+        async fn mark_first_sync_succeeded(&self) -> Result<bool, FirstSyncStateError> {
+            Ok(false)
+        }
+        async fn mark_first_file_sync_succeeded(&self) -> Result<bool, FirstSyncStateError> {
+            Ok(false)
+        }
+    }
+
+    // ── mockall ──────────────────────────────────────────────────────────
+
+    mockall::mock! {
+        pub PeerAddrRepo {}
+        #[async_trait]
+        impl PeerAddressRepositoryPort for PeerAddrRepo {
+            async fn get(
+                &self,
+                device: &DeviceId,
+            ) -> Result<Option<PeerAddressRecord>, PeerAddressError>;
+            async fn upsert(&self, record: &PeerAddressRecord) -> Result<(), PeerAddressError>;
+            async fn list(&self) -> Result<Vec<PeerAddressRecord>, PeerAddressError>;
+            async fn remove(&self, device: &DeviceId) -> Result<(), PeerAddressError>;
+        }
+    }
+
+    mockall::mock! {
+        pub Presence {}
+        #[async_trait]
+        impl PresencePort for Presence {
+            async fn ensure_reachable(
+                &self,
+                device: &DeviceId,
+            ) -> Result<ReachabilityState, PresenceError>;
+            async fn current_state(&self, device: &DeviceId) -> ReachabilityState;
+            fn subscribe(&self) -> broadcast::Receiver<PresenceEvent>;
+        }
+    }
+
+    mockall::mock! {
+        pub Cipher {}
+        #[async_trait]
+        impl TransferCipherPort for Cipher {
+            async fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>, TransferCipherError>;
+            async fn decrypt(&self, encrypted: &[u8]) -> Result<Vec<u8>, TransferCipherError>;
+        }
+    }
+
+    mockall::mock! {
+        pub Dispatch {}
+        #[async_trait]
+        impl ClipboardDispatchPort for Dispatch {
+            async fn dispatch(
+                &self,
+                target: &DeviceId,
+                header: &ClipboardHeader,
+                payload: SyncPayload,
+            ) -> DispatchReport;
+        }
+    }
+
+    /// Wrap a wire outcome in a `DispatchReport` for mock returns. These
+    /// facade tests assert the sync funnel (attempted/succeeded/deferred), not
+    /// the `transport` bucket, so a fixed `Direct` keeps the return explicit.
+    fn dispatch_report(outcome: Result<DispatchAck, ClipboardDispatchError>) -> DispatchReport {
+        DispatchReport {
+            transport: ConnectionChannel::Direct,
+            timing: uc_core::ports::DispatchTiming::default(),
+            outcome,
+        }
+    }
+
+    mockall::mock! {
+        pub DeviceId_ {}
+        impl DeviceIdentityPort for DeviceId_ {
+            fn current_device_id(&self) -> DeviceId;
+        }
+    }
+
+    mockall::mock! {
+        pub LocalIdentity {}
+        #[async_trait]
+        impl LocalIdentityPort for LocalIdentity {
+            async fn create(&self) -> Result<IdentityFingerprint, LocalIdentityError>;
+            async fn ensure(&self) -> Result<IdentityFingerprint, LocalIdentityError>;
+            async fn get_current_fingerprint(
+                &self,
+            ) -> Result<Option<IdentityFingerprint>, LocalIdentityError>;
+        }
+    }
+
+    mockall::mock! {
+        pub Settings_ {}
+        #[async_trait]
+        impl SettingsPort for Settings_ {
+            async fn load(&self) -> anyhow::Result<Settings>;
+            async fn save(&self, s: &Settings) -> anyhow::Result<()>;
+        }
+    }
+
+    mockall::mock! {
+        pub MemberRepo {}
+        #[async_trait]
+        impl MemberRepositoryPort for MemberRepo {
+            async fn get(
+                &self,
+                device_id: &DeviceId,
+            ) -> Result<Option<SpaceMember>, MembershipError>;
+            async fn list(&self) -> Result<Vec<SpaceMember>, MembershipError>;
+            async fn save(&self, member: &SpaceMember) -> Result<(), MembershipError>;
+            async fn remove(&self, device_id: &DeviceId) -> Result<bool, MembershipError>;
+        }
+    }
+
+    mockall::mock! {
+        pub EntryDeliveryRepo {}
+        #[async_trait]
+        impl EntryDeliveryRepositoryPort for EntryDeliveryRepo {
+            async fn record_attempt(
+                &self,
+                record: &uc_core::clipboard::EntryDeliveryRecord,
+            ) -> Result<(), uc_core::clipboard::EntryDeliveryError>;
+            async fn list_by_entry(
+                &self,
+                entry_id: &EntryId,
+            ) -> Result<
+                Vec<uc_core::clipboard::EntryDeliveryRecord>,
+                uc_core::clipboard::EntryDeliveryError,
+            >;
+        }
+    }
+
+    mockall::mock! {
+        pub EntryRepo {}
+        #[async_trait]
+        impl GetClipboardEntryPort for EntryRepo {
+            async fn get_entry(
+                &self,
+                entry_id: &EntryId,
+            ) -> std::result::Result<
+                Option<uc_core::clipboard::ClipboardEntry>,
+                uc_core::clipboard::ClipboardRepositoryError,
+            >;
+        }
+    }
+
+    mockall::mock! {
+        pub EventRepo {}
+        #[async_trait]
+        impl ClipboardEventRepositoryPort for EventRepo {
+            async fn get_representation(
+                &self,
+                id: &uc_core::ids::EventId,
+                representation_id: &str,
+            ) -> anyhow::Result<uc_core::ObservedClipboardRepresentation>;
+            async fn get_source_device(
+                &self,
+                event_id: &uc_core::ids::EventId,
+            ) -> anyhow::Result<Option<DeviceId>>;
+        }
+    }
+
+    mockall::mock! {
+        pub TrustedPeerRepo {}
+        #[async_trait]
+        impl TrustedPeerRepositoryPort for TrustedPeerRepo {
+            async fn get(
+                &self,
+                peer_device_id: &DeviceId,
+            ) -> Result<
+                Option<uc_core::trusted_peer::TrustedPeer>,
+                uc_core::trusted_peer::TrustedPeerError,
+            >;
+            async fn list(
+                &self,
+            ) -> Result<
+                Vec<uc_core::trusted_peer::TrustedPeer>,
+                uc_core::trusted_peer::TrustedPeerError,
+            >;
+            async fn save(
+                &self,
+                trusted_peer: &uc_core::trusted_peer::TrustedPeer,
+            ) -> Result<(), uc_core::trusted_peer::TrustedPeerError>;
+            async fn remove(
+                &self,
+                peer_device_id: &DeviceId,
+            ) -> Result<bool, uc_core::trusted_peer::TrustedPeerError>;
+        }
+    }
+
+    mockall::mock! {
+        pub MobileDeviceRepo {}
+        #[async_trait]
+        impl FindMobileDeviceByIdPort for MobileDeviceRepo {
+            async fn find_by_device_id(
+                &self,
+                device_id: &uc_core::mobile_sync::MobileDeviceId,
+            ) -> Result<Option<uc_core::mobile_sync::MobileDevice>, uc_core::mobile_sync::MobileDeviceError>;
+        }
+    }
+
+    fn make_noop_mobile_device_repo() -> MockMobileDeviceRepo {
+        let mut m = MockMobileDeviceRepo::new();
+        m.expect_find_by_device_id().returning(|_| Ok(None));
+        m
+    }
+
+    /// `MemberRepo` mock that returns a default-allowed `SpaceMember` for
+    /// every device. The two pre-existing facade verdicts (dispatch +
+    /// ingest) predate per-device gating; this keeps them green.
+    fn make_member_repo_all_enabled() -> MockMemberRepo {
+        let mut m = MockMemberRepo::new();
+        m.expect_get().returning(|did| {
+            Ok(Some(SpaceMember {
+                device_id: did.clone(),
+                device_name: format!("Test {}", did.as_str()),
+                identity_fingerprint: fp(),
+                joined_at: chrono::Utc::now(),
+                sync_preferences: MemberSyncPreferences::default(),
+            }))
+        });
+        m
+    }
+
+    struct FixedClock(i64);
+    impl ClockPort for FixedClock {
+        fn now_ms(&self) -> i64 {
+            self.0
+        }
+    }
+
+    // ── helpers ─────────────────────────────────────────────────────────
+
+    fn fp() -> IdentityFingerprint {
+        IdentityFingerprint::from_raw_string("AAAABBBBCCCCDDDD").unwrap()
+    }
+
+    fn record(device: &str) -> PeerAddressRecord {
+        PeerAddressRecord {
+            device_id: DeviceId::new(device),
+            addr_blob: vec![0xAA; 8],
+            observed_at: chrono::Utc::now(),
+        }
+    }
+
+    /// Build a `DeviceIdentity` mock that returns the same `device_id`
+    /// every call.
+    fn make_device_identity(local: &str) -> MockDeviceId_ {
+        let local = DeviceId::new(local);
+        let mut m = MockDeviceId_::new();
+        m.expect_current_device_id()
+            .returning(move || local.clone());
+        m
+    }
+
+    fn make_local_identity() -> MockLocalIdentity {
+        let mut m = MockLocalIdentity::new();
+        m.expect_get_current_fingerprint()
+            .returning(|| Ok(Some(fp())));
+        m
+    }
+
+    fn make_settings() -> MockSettings_ {
+        let mut m = MockSettings_::new();
+        m.expect_load().returning(|| Ok(Settings::default()));
+        m
+    }
+
+    fn make_presence_unknown() -> MockPresence {
+        let mut m = MockPresence::new();
+        m.expect_current_state()
+            .returning(|_| ReachabilityState::Unknown);
+        m
+    }
+
+    /// 本文件的 dispatch 端到端验证不关心 delivery 表副作用,默认 noop。
+    fn make_noop_entry_delivery_repo() -> MockEntryDeliveryRepo {
+        let mut m = MockEntryDeliveryRepo::new();
+        m.expect_record_attempt().returning(|_| Ok(()));
+        m.expect_list_by_entry().returning(|_| Ok(Vec::new()));
+        m
+    }
+
+    /// 视图组装路径(`get_entry_delivery_view`)在本文件的 dispatch 测试里
+    /// 不会被触发。下面三个仓储给一组最小可用的 noop,只为让 facade 装配
+    /// 通过;`get_representation` 故意不配 returning——一旦意外调到,mockall
+    /// 默认 panic,把"视图路径在本文件不应被触发"这层契约硬化成测试失败。
+    fn make_noop_entry_repo() -> MockEntryRepo {
+        let mut m = MockEntryRepo::new();
+        m.expect_get_entry().returning(|_| Ok(None));
+        m
+    }
+
+    fn make_noop_event_repo() -> MockEventRepo {
+        let mut m = MockEventRepo::new();
+        m.expect_get_source_device().returning(|_| Ok(None));
+        m
+    }
+
+    fn make_noop_trusted_peer_repo() -> MockTrustedPeerRepo {
+        let mut m = MockTrustedPeerRepo::new();
+        m.expect_get().returning(|_| Ok(None));
+        m.expect_list().returning(|| Ok(Vec::new()));
+        m.expect_save().returning(|_| Ok(()));
+        m.expect_remove().returning(|_| Ok(false));
+        m
+    }
+
+    /// Wire the outbound facade with the given mock ports.
+    fn build_facade(
+        peer_addr_repo: MockPeerAddrRepo,
+        presence: MockPresence,
+        cipher: MockCipher,
+        dispatch: MockDispatch,
+        device_identity: MockDeviceId_,
+        local_identity: MockLocalIdentity,
+        settings: MockSettings_,
+    ) -> ClipboardSyncFacade {
+        ClipboardSyncFacade::new(ClipboardSyncDeps {
+            peer_addr_repo: Arc::new(peer_addr_repo),
+            member_repo: Arc::new(make_member_repo_all_enabled()),
+            removal_gate: Arc::new(crate::clipboard::sync::dispatch_entry::AllowAllRemovalTargets),
+            peer_scope: Arc::new(crate::clipboard::sync::dispatch_entry::AllTestPeerScope),
+            presence: Arc::new(presence),
+            transfer_cipher: Arc::new(cipher),
+            mailbox: None,
+            clipboard_dispatch: Arc::new(dispatch),
+            device_identity: Arc::new(device_identity),
+            local_identity: Arc::new(local_identity),
+            settings: Arc::new(settings),
+            clock: Arc::new(FixedClock(1_700_000_000_000)),
+            analytics: Arc::new(uc_observability_contract::analytics::NoopAnalyticsSink),
+            first_sync_state: Arc::new(NoopFirstSyncState),
+            entry_delivery_repo: Arc::new(make_noop_entry_delivery_repo()),
+            entry_repo: Arc::new(make_noop_entry_repo()),
+            event_repo: Arc::new(make_noop_event_repo()),
+            trusted_peer_repo: Arc::new(make_noop_trusted_peer_repo()),
+            mobile_device_repo: Arc::new(make_noop_mobile_device_repo()),
+            host_event_bus: Arc::new(crate::facade::host_event::HostEventBus::new()),
+        })
+    }
+
+    // ── verdicts ────────────────────────────────────────────────────────
+
+    /// Verdict 1 — `dispatch_entry` delegates to the inner use case and
+    /// returns the public-shape outcome. mockall asserts: peer_addr_repo
+    /// listed once, encrypt called once, dispatch called once for peer-a.
+    /// Presence is read only for telemetry classification; it must not filter
+    /// dispatch candidates (see dispatch_entry.rs module doc on iteration source).
+    #[tokio::test]
+    async fn dispatch_entry_returns_public_outcome_for_online_peer() {
+        let mut repo = MockPeerAddrRepo::new();
+        repo.expect_list()
+            .times(1)
+            .returning(|| Ok(vec![record("peer-a")]));
+
+        let presence = make_presence_unknown();
+
+        let mut cipher = MockCipher::new();
+        cipher
+            .expect_encrypt()
+            .times(1)
+            .returning(|p| Ok(p.to_vec()));
+
+        let mut dispatch = MockDispatch::new();
+        dispatch
+            .expect_dispatch()
+            .with(eq(DeviceId::new("peer-a")), always(), always())
+            .times(1)
+            .returning(|_, _, _| dispatch_report(Ok(DispatchAck::Accepted)));
+
+        let facade = build_facade(
+            repo,
+            presence,
+            cipher,
+            dispatch,
+            make_device_identity("self"),
+            make_local_identity(),
+            make_settings(),
+        );
+
+        let outcome = facade
+            .dispatch_entry(DispatchEntryInput {
+                plaintext: Bytes::from_static(b"hello"),
+                snapshot_hash: "abc".to_string(),
+                payload_version: 3,
+                target_filter: None,
+            })
+            .await
+            .expect("dispatch ok");
+        assert_eq!(outcome.total_accepted, 1);
+        assert_eq!(outcome.per_target.len(), 1);
+        assert_eq!(outcome.per_target[0].device_id.as_str(), "peer-a");
+    }
+
+    /// Verdict 3 — `dispatch_snapshot` encodes the snapshot into the V3
+    /// envelope + derives the canonical snapshot_hash from
+    /// `snapshot_hash()`, then calls the same underlying dispatch path
+    /// as `dispatch_entry`. mockall asserts encrypt is invoked with the
+    /// encoded envelope bytes (not raw plaintext), and that the target
+    /// dispatch fires with `payload_version=3`.
+    #[tokio::test]
+    async fn dispatch_snapshot_encodes_envelope_and_fans_out() {
+        use uc_core::ids::{FormatId, RepresentationId};
+        use uc_core::{MimeType, ObservedClipboardRepresentation, SystemClipboardSnapshot};
+
+        let mut repo = MockPeerAddrRepo::new();
+        repo.expect_list()
+            .times(1)
+            .returning(|| Ok(vec![record("peer-a")]));
+
+        let presence = make_presence_unknown();
+
+        let mut cipher = MockCipher::new();
+        // Encrypt gets the V3 envelope bytes, not the raw text. We just
+        // assert it's called once and round-trip the bytes unchanged
+        // (the test cipher is a passthrough for assertion purposes).
+        cipher
+            .expect_encrypt()
+            .times(1)
+            .withf(|plaintext| {
+                // The V3 envelope starts with 8B ts_ms (LE) + 2B rep_count (LE).
+                // For our fixture: ts_ms=7 → [0x07, 0, 0, 0, 0, 0, 0, 0],
+                // rep_count=1 → [0x01, 0x00]. Anchor on rep_count to keep the
+                // assertion resilient to ts_ms choice.
+                plaintext.len() > 10 && plaintext[8..10] == [0x01, 0x00]
+            })
+            .returning(|p| Ok(p.to_vec()));
+
+        let mut dispatch = MockDispatch::new();
+        dispatch
+            .expect_dispatch()
+            .with(eq(DeviceId::new("peer-a")), always(), always())
+            .times(1)
+            .withf(|_target, header, _payload| header.payload_version == 3)
+            .returning(|_, _, _| dispatch_report(Ok(DispatchAck::Accepted)));
+
+        let facade = build_facade(
+            repo,
+            presence,
+            cipher,
+            dispatch,
+            make_device_identity("self"),
+            make_local_identity(),
+            make_settings(),
+        );
+
+        let snapshot = SystemClipboardSnapshot {
+            ts_ms: 7,
+            representations: vec![ObservedClipboardRepresentation::new(
+                RepresentationId::new(),
+                FormatId::from("text"),
+                Some(MimeType("text/plain".to_string())),
+                b"hello phase3".to_vec(),
+            )],
+            file_content_digests: Vec::new(),
+            file_set_v1_component: None,
+        };
+        let outcome = facade
+            .dispatch_snapshot(
+                snapshot,
+                uc_core::ClipboardChangeOrigin::LocalCapture,
+                None,
+                None,
+            )
+            .await
+            .expect("dispatch_snapshot ok");
+        assert_eq!(outcome.total_accepted, 1);
+        assert!(
+            outcome.snapshot_hash.starts_with("blake3v1:"),
+            "outcome carries the canonical snapshot_hash, got {}",
+            outcome.snapshot_hash
+        );
+    }
+
+    /// Verdict 5 — `DispatchEntryInput.target_filter = Some([peer-b])` threads
+    /// through to the use case. peer-a is listed in `peer_addr_repo` but the
+    /// filter excludes it, so `MockDispatch` registers an expectation only for
+    /// peer-b. mockall enforces "no other call ever happened" on Drop — if
+    /// the filter were dropped on the floor, peer-a would unexpectedly hit
+    /// dispatch and the test would panic.
+    #[tokio::test]
+    async fn dispatch_entry_with_target_filter_threads_to_use_case() {
+        let mut repo = MockPeerAddrRepo::new();
+        repo.expect_list()
+            .times(1)
+            .returning(|| Ok(vec![record("peer-a"), record("peer-b")]));
+
+        let presence = make_presence_unknown();
+
+        let mut cipher = MockCipher::new();
+        cipher
+            .expect_encrypt()
+            .times(1)
+            .returning(|p| Ok(p.to_vec()));
+
+        let mut dispatch = MockDispatch::new();
+        dispatch
+            .expect_dispatch()
+            .with(eq(DeviceId::new("peer-b")), always(), always())
+            .times(1)
+            .returning(|_, _, _| dispatch_report(Ok(DispatchAck::Accepted)));
+
+        let facade = build_facade(
+            repo,
+            presence,
+            cipher,
+            dispatch,
+            make_device_identity("self"),
+            make_local_identity(),
+            make_settings(),
+        );
+
+        let outcome = facade
+            .dispatch_entry(DispatchEntryInput {
+                plaintext: Bytes::from_static(b"hello"),
+                snapshot_hash: "abc".to_string(),
+                payload_version: 3,
+                target_filter: Some(vec![DeviceId::new("peer-b")]),
+            })
+            .await
+            .expect("dispatch ok");
+        assert_eq!(outcome.total_accepted, 1);
+        assert_eq!(outcome.per_target.len(), 1);
+        assert_eq!(outcome.per_target[0].device_id.as_str(), "peer-b");
+    }
+}

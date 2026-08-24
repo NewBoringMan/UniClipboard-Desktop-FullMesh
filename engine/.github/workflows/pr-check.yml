@@ -1,0 +1,77 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches: [main, migration/initial-core-import]
+  push:
+    branches: [main, migration/initial-core-import]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Engine repository checks
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      - name: Validate workspace metadata
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: Check all workspace targets
+        run: cargo check --workspace --all-targets --locked
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check repository ownership and release rules
+        run: node scripts/architecture/check-engine-repository.mjs
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+  coverage:
+    name: Rust coverage
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          workspaces: . -> target
+          shared-key: rust-coverage
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Generate Rust coverage
+        run: cargo llvm-cov --workspace --all-targets --locked --lcov --output-path lcov.info
+
+      - name: Upload Rust coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
+        with:
+          disable_search: true
+          fail_ci_if_error: true
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}

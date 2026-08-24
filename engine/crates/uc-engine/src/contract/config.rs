@@ -1,0 +1,185 @@
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+const DEFAULT_PROFILE_ID: &str = "default";
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EngineConfig {
+    app_version: String,
+    profile_id: String,
+    #[serde(default)]
+    portable_storage: bool,
+    #[serde(skip)]
+    mailbox_service_url: Option<String>,
+    #[serde(skip)]
+    mailbox_bearer_token: Option<crate::SecretString>,
+    #[cfg(feature = "dev-tools")]
+    #[serde(skip)]
+    rendezvous_base_url: Option<String>,
+    #[cfg(feature = "dev-tools")]
+    #[serde(skip)]
+    test_relay_fallback: Option<bool>,
+    #[cfg(feature = "dev-tools")]
+    #[serde(skip)]
+    test_iroh_bind_port: Option<u16>,
+}
+
+impl EngineConfig {
+    pub fn new(app_version: impl Into<String>) -> Self {
+        Self {
+            app_version: app_version.into(),
+            profile_id: DEFAULT_PROFILE_ID.to_string(),
+            portable_storage: false,
+            mailbox_service_url: None,
+            mailbox_bearer_token: None,
+            #[cfg(feature = "dev-tools")]
+            rendezvous_base_url: None,
+            #[cfg(feature = "dev-tools")]
+            test_relay_fallback: None,
+            #[cfg(feature = "dev-tools")]
+            test_iroh_bind_port: None,
+        }
+    }
+
+    pub fn with_profile_id(mut self, profile_id: impl Into<String>) -> Self {
+        self.profile_id = profile_id.into();
+        self
+    }
+
+    pub fn with_portable_storage(mut self, portable_storage: bool) -> Self {
+        self.portable_storage = portable_storage;
+        self
+    }
+
+    /// Enable the optional ciphertext-only store-and-forward mailbox. The
+    /// bearer token remains process memory only and is never serialized or
+    /// included in Debug output.
+    pub fn with_mailbox_service(
+        mut self,
+        base_url: impl Into<String>,
+        bearer_token: crate::SecretString,
+    ) -> Self {
+        self.mailbox_service_url = Some(base_url.into());
+        self.mailbox_bearer_token = Some(bearer_token);
+        self
+    }
+
+    pub fn app_version(&self) -> &str {
+        &self.app_version
+    }
+
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn uses_portable_storage(&self) -> bool {
+        self.portable_storage
+    }
+
+    pub(crate) fn mailbox_service(&self) -> Option<(&str, &crate::SecretString)> {
+        Some((
+            self.mailbox_service_url.as_deref()?,
+            self.mailbox_bearer_token.as_ref()?,
+        ))
+    }
+
+    #[cfg(feature = "dev-tools")]
+    pub fn with_rendezvous_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.rendezvous_base_url = Some(base_url.into());
+        self
+    }
+
+    #[cfg(feature = "dev-tools")]
+    pub fn with_test_relay_fallback(mut self, allow_relay_fallback: bool) -> Self {
+        self.test_relay_fallback = Some(allow_relay_fallback);
+        self
+    }
+
+    #[cfg(feature = "dev-tools")]
+    pub fn with_test_iroh_bind_port(mut self, port: u16) -> Self {
+        self.test_iroh_bind_port = Some(port);
+        self
+    }
+
+    pub(crate) fn rendezvous_base_url_override(&self) -> Option<String> {
+        #[cfg(feature = "dev-tools")]
+        {
+            return self.rendezvous_base_url.clone();
+        }
+        #[cfg(not(feature = "dev-tools"))]
+        {
+            None
+        }
+    }
+
+    pub(crate) fn test_relay_fallback_override(&self) -> Option<bool> {
+        #[cfg(feature = "dev-tools")]
+        {
+            return self.test_relay_fallback;
+        }
+        #[cfg(not(feature = "dev-tools"))]
+        {
+            None
+        }
+    }
+
+    pub(crate) fn test_iroh_bind_port_override(&self) -> Option<u16> {
+        #[cfg(feature = "dev-tools")]
+        {
+            return self.test_iroh_bind_port;
+        }
+        #[cfg(not(feature = "dev-tools"))]
+        {
+            None
+        }
+    }
+}
+
+impl fmt::Debug for EngineConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = formatter.debug_struct("EngineConfig");
+        debug
+            .field("app_version", &self.app_version)
+            .field("profile_id", &"[REDACTED]")
+            .field("portable_storage", &self.portable_storage)
+            .field("mailbox_configured", &self.mailbox_service_url.is_some());
+        #[cfg(feature = "dev-tools")]
+        debug.field(
+            "has_rendezvous_override",
+            &self.rendezvous_base_url.is_some(),
+        );
+        #[cfg(feature = "dev-tools")]
+        debug.field(
+            "has_test_relay_fallback_override",
+            &self.test_relay_fallback.is_some(),
+        );
+        #[cfg(feature = "dev-tools")]
+        debug.field(
+            "has_test_iroh_bind_port_override",
+            &self.test_iroh_bind_port.is_some(),
+        );
+        debug.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mailbox_credentials_are_neither_serialized_nor_debugged() {
+        let secret = "fullmesh-mailbox-secret-that-must-not-leak";
+        let url = "https://mailbox.example.test/private";
+        let config =
+            EngineConfig::new("test").with_mailbox_service(url, crate::SecretString::new(secret));
+
+        let serialized = serde_json::to_string(&config).expect("serialize EngineConfig");
+        let debug = format!("{config:?}");
+        assert!(!serialized.contains(secret));
+        assert!(!serialized.contains(url));
+        assert!(!debug.contains(secret));
+        assert!(!debug.contains(url));
+        assert!(debug.contains("mailbox_configured: true"));
+    }
+}

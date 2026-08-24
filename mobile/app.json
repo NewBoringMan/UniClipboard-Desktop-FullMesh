@@ -1,0 +1,115 @@
+{
+  "expo": {
+    "name": "UniClip",
+    "slug": "uniclip",
+    "scheme": "uniclipboard",
+    "version": "2.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "buildNumber": "179",
+      "supportsTablet": true,
+      "appleTeamId": "8XG39X5CL8",
+      "bundleIdentifier": "app.uniclipboard.UniClipboard",
+      "infoPlist": { "ITSAppUsesNonExemptEncryption": false },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.app.uniclipboard.UniClipboard",
+          "group.app.uniclipboard.ios"
+        ]
+      }
+    },
+    "android": {
+      "versionCode": 179,
+      "softwareKeyboardLayoutMode": "pan",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundImage": "./assets/adaptive-icon-bg.png",
+        "monochromeImage": "./assets/adaptive-icon-mono.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "app.uniclipboard.android",
+      "permissions": ["android.permission.REQUEST_INSTALL_PACKAGES", "android.permission.CAMERA"]
+    },
+    "web": { "favicon": "./assets/favicon.png" },
+    "plugins": [
+      "./plugins/build/withNativeLogger.js",
+      "./plugins/build/withIosSettingsBundle.js",
+      "./plugins/build/withIosOrientation.js",
+      "./plugins/build/withAndroidOrientation.js",
+      "./plugins/build/withNetworkSecurityConfig.js",
+      "./plugins/build/withQuickSettingsTileManifest.js",
+      "./plugins/build/withProcessTextManifest.js",
+      "./plugins/build/withQuickActionActivity.js",
+      "./plugins/build/withServiceRestartActivity.js",
+      "./plugins/build/withAndroidNativeCode.js",
+      "./plugins/build/withClipboardOverlayPermission.js",
+      "./plugins/build/withNativeUtilPermission.js",
+      "./plugins/build/withForegroundService.js",
+      "./plugins/build/withDarkSplashScreen.js",
+      "./plugins/build/withAbiSplits.js",
+      "./plugins/build/withGradleBuildTuning.js",
+      "./plugins/build/withUnifiedEngineRelease.js",
+      "./plugins/build/withAndroidBuildVersionName.js",
+      "./plugins/build/withPostHogAnalytics.js",
+      "./plugins/build/withExtensionP2PKeychainGroup.js",
+      "./plugins/build/withXcode27SceneLifecycle.js",
+      "./plugins/build/withXcode27DeploymentTargets.js",
+      "@bacons/apple-targets",
+      "./plugins/build/withLocalNotificationsOnly.js",
+      "expo-notifications",
+      ["expo-sharing", { "android": { "enabled": true, "singleShareMimeTypes": ["*/*"] } }],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "授权 UniClip 使用相机以扫描二维码接入服务器",
+          "microphonePermission": "授权 UniClip 在录像时使用麦克风"
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-localization",
+        {
+          "supportedLocales": {
+            "ios": ["zh-Hans", "en", "ru", "pt-BR"],
+            "android": ["zh", "en", "ru", "pt-BR"]
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "share",
+                  "bundleIdentifier": "app.uniclipboard.UniClipboard.Share",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.app.uniclipboard.UniClipboard",
+                      "group.app.uniclipboard.ios"
+                    ]
+                  }
+                },
+                {
+                  "targetName": "keyboard",
+                  "bundleIdentifier": "app.uniclipboard.UniClipboard.Keyboard",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.app.uniclipboard.UniClipboard",
+                      "group.app.uniclipboard.ios"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "releaseChannel": { "name": "alpha", "number": 3 }
+    }
+  }
+}

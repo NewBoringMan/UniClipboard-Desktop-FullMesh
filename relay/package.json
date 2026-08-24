@@ -1,0 +1,15 @@
+{
+  "name": "@uniclipboard/fullmesh-relay-control-plane",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0 <23"
+  },
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test --test-reporter=spec",
+    "check": "node --check src/index.mjs && node --check src/server.mjs && node --check src/mailbox-store.mjs"
+  }
+}
+

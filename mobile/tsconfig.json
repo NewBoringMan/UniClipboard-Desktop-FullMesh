@@ -1,0 +1,37 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@components/*": ["src/components/*"],
+      "@screens/*": ["src/screens/*"],
+      "@stores/*": ["src/stores/*"],
+      "@types/*": ["src/types/*"],
+      "@utils/*": ["src/utils/*"],
+      "@constants/*": ["src/constants/*"],
+      "@navigation/*": ["src/navigation/*"],
+      "@hooks/*": ["src/hooks/*"],
+      "@assets/*": ["src/assets/*"],
+      "android-util": ["modules/android-util/src"],
+      "app-group-store": ["modules/app-group-store/src"],
+      "shortcut": ["modules/shortcut/src"],
+      "native-timer": ["modules/native-timer/src"],
+      "clipboard-overlay": ["modules/clipboard-overlay/src"],
+      "shizuku-clipboard": ["modules/shizuku-clipboard/src"],
+      "foreground-service": ["modules/foreground-service/src"],
+      "uc-engine": ["modules/uc-engine/src"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": [
+    "node_modules",
+    "ios-shims",
+    "src/__tests__",
+    "plugins",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

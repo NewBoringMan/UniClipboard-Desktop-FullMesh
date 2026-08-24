@@ -1,0 +1,70 @@
+[workspace]
+members = [
+  "crates/uc-engine",
+  "crates/uc-core",
+  "crates/uc-application",
+  "crates/uc-infra",
+  "crates/uc-content-hash",
+  "crates/uc-observability-contract",
+  "bindings/uc-engine-uniffi",
+  "bindings/uc-ohos-napi",
+  "compatibility/uc-mobile-proto",
+  "compatibility/uc-mobile",
+  "compatibility/uc-mobile-lan",
+  "tests/hosts/uc-mobile-probe-core",
+  "tests/openmls-validation",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.1.0-rc.6-fullmesh.1"
+license = "Apache-2.0"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+dbg_macro = "warn"
+
+# Keep the audited UniClipboard fix for HashContext::persist().
+[patch.crates-io]
+iroh-blobs = { git = "https://github.com/UniClipboard/iroh-blobs.git", rev = "b33af91e8a4bd189cc0f954fc6584feb5ffd1823" }
+# A closed discovery actor must terminate its delayed GC task instead of retrying indefinitely.
+swarm-discovery = { path = "third_party/swarm-discovery" }
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.chacha20]
+opt-level = 3
+[profile.dev.package.chacha20poly1305]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "z"
+debug = "line-tables-only"
+split-debuginfo = "packed"
+strip = "symbols"

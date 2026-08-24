@@ -1,0 +1,297 @@
+{
+  "connection": {
+    "addTitle": "新增同步连接",
+    "addSheetTitle": "新增连接",
+    "p2pDescription": "端到端加密空间",
+    "invitationExpires": "邀请码将在 {{time}} 到期"
+  },
+  "relay": {
+    "title": "自定义中继节点",
+    "url": "中继地址",
+    "token": "访问令牌（可选）",
+    "save": "保存中继节点",
+    "remove": "移除中继节点",
+    "add": "添加中继节点",
+    "edit": "编辑中继节点",
+    "summary": "未设置",
+    "configured": "已设置",
+    "configuredCount": "已设置 {{count}} 个节点",
+    "footer": "仅使用 HTTP 或 HTTPS 地址。访问令牌只保存在设备的安全区域。",
+    "error": {
+      "saveFailed": "无法保存中继节点"
+    }
+  },
+  "space": {
+    "title": "我的空间",
+    "footer": "设备名、口令和邀请码仅用于本次操作，不会保存到应用设置中。",
+    "mode": "设置方式",
+    "working": "处理中...",
+    "empty": {
+      "title": "开始使用我的空间",
+      "body": "在你的设备之间安全同步剪贴板内容。"
+    },
+    "overview": {
+      "title": "当前状态",
+      "syncHealthy": "同步正常",
+      "deviceSummary": "{{online}} 台在线 · {{offline}} 台离线",
+      "syncError": "同步异常",
+      "devicesAvailable": "可同步",
+      "noDevicesOnline": "暂无可同步设备",
+      "noOtherDevices": "还没有其他设备",
+      "otherDevicesOffline": "{{count}} 台其他设备暂时离线",
+      "statusUnavailable": "设备状态未更新",
+      "memberCount": "空间内共 {{count}} 台设备",
+      "status": {
+        "decisionRequired": "需要核对设备变化",
+        "unverifiable": "无法核验设备资料",
+        "updateRequired": "有设备需要更新",
+        "updating": "正在更新空间",
+        "refreshing": "正在更新设备状态",
+        "healthy": "设备可以同步",
+        "empty": "空间内没有设备"
+      }
+    },
+    "create": {
+      "title": "创建新空间",
+      "description": "在这台设备上建立一个新的加密空间",
+      "action": "创建"
+    },
+    "join": {
+      "title": "加入已有空间",
+      "description": "使用另一台设备生成的邀请码加入",
+      "action": "加入"
+    },
+    "field": {
+      "deviceName": "设备名称",
+      "passphrase": "空间口令",
+      "invitationCode": "邀请码"
+    },
+    "flow": {
+      "createTitle": "从这台设备开始",
+      "createBody": "确认这台设备的名称，并用空间口令保护新空间。",
+      "joinCodeSheetTitle": "加入空间",
+      "joinCodeTitle": "输入 8 位邀请码",
+      "joinCodeBody": "邀请码显示在已经进入空间的另一台设备上。",
+      "joinDetailsTitle": "确认这台设备",
+      "joinDetailsBody": "输入相同的空间口令，并确认这台设备的名称。",
+      "continue": "继续",
+      "waitingTitle": "空间已创建",
+      "waitingForDevice": "正在等待另一台设备",
+      "waitingBody": "另一台设备加入前，请保持邀请码有效。",
+      "successTitle": "设备已连接",
+      "successBody": "这个空间已经可以同步剪贴板内容。",
+      "copyInvitation": "复制邀请码",
+      "shareInvitation": "分享邀请",
+      "shareMessage": "使用邀请码 {{code}} 加入我的 UniClip 空间。",
+      "expiresIn": "{{time}} 后过期",
+      "expired": "这个邀请码已过期",
+      "finishLater": "稍后完成",
+      "thisDevice": "这台设备",
+      "otherDevice": "另一台设备"
+    },
+    "status": {
+      "ready": "空间已就绪",
+      "spaceId": "空间编号",
+      "currentDevice": "本机：{{name}}"
+    },
+    "invitation": {
+      "title": "邀请其他设备",
+      "description": "为已有空间生成一个限时邀请码。",
+      "action": "生成邀请码",
+      "addAction": "添加设备",
+      "addA11y": "邀请新设备",
+      "code": "邀请码",
+      "pairingInstructions": "请在新设备输入此邀请码，加入空间并完成配对。",
+      "pairedDevice": "{{device}} 已加入这个空间。",
+      "crossNetwork": "此邀请码可用于其他网络中的设备。",
+      "sameLocalNetwork": "此邀请码仅在两台设备连接同一局域网时有效。"
+    },
+    "devices": {
+      "title": "空间设备",
+      "empty": "还没有其他设备",
+      "refreshFailed": "无法更新设备，当前显示的是上次结果。",
+      "online": "在线",
+      "offline": "离线",
+      "thisDevice": "本机",
+      "otherTitle": "其他设备",
+      "remove": "移除设备",
+      "removeConfirm": "确定从空间中移除这台设备吗？",
+      "removeConfirmNamed": "确定从空间中移除 {{device}} 吗？本机会立即停止向这台设备分享新内容；再次加入需要新的邀请。其他离线设备上线后，可能会要求确认这项变化。",
+      "removeEffect": "本机会立即停止向这台设备分享新内容；再次加入需要新的邀请。其他离线设备上线后，可能会要求确认这项变化。",
+      "manageHint": "打开设备管理",
+      "idLabel": "设备 ID {{id}}"
+    },
+    "deviceDetail": {
+      "title": "设备详情",
+      "updateAction": "检查更新",
+      "identity": {
+        "label": "设备身份",
+        "local": "本机",
+        "remote": "其他设备"
+      },
+      "blockedReason": {
+        "noCurrentChange": "当前没有需要处理的设备变化。",
+        "changeNoLongerCurrent": "这项设备变化已经不是最新状态，请刷新后再试。",
+        "localDeviceConfirmationRequired": "需要先确认本机的空间变化。",
+        "localDeviceRemoved": "本机已不属于这个空间。",
+        "recoveryNotAvailableInThisVersion": "当前版本无法完成空间恢复。",
+        "peerUpgradeRequired": "需要先更新相关设备。",
+        "deviceFactsUnverifiable": "暂时无法核验这台设备的资料。",
+        "engineUnavailable": "暂时无法读取空间设备资料。"
+      },
+      "reachability": {
+        "label": "连接状态",
+        "online": "在线",
+        "offline": "离线",
+        "unknown": "未知"
+      },
+      "groupRelationship": {
+        "label": "空间归属",
+        "consistent": "当前空间",
+        "pendingLocalDecision": "等待你选择",
+        "diverged": "不同空间",
+        "unverifiable": "无法核验",
+        "unknown": "未知"
+      },
+      "syncRelationship": {
+        "label": "同步能力",
+        "usable": "可以同步",
+        "waitingForLocalDecision": "等待你选择",
+        "pausedGroupDiverged": "因空间不同已停止",
+        "pausedUpgradeRequired": "更新前暂停",
+        "pausedUnverifiable": "核验期间暂停",
+        "removedLocalDevice": "本机已退出",
+        "removedPeerDevice": "设备已移除",
+        "unknown": "未知"
+      },
+      "compatibility": {
+        "label": "版本状态",
+        "compatible": "兼容",
+        "upgradeRequired": "需要更新",
+        "unknown": "未知"
+      }
+    },
+    "operation": {
+      "title": {
+        "removeMember": "设备已移除",
+        "applyChange": "已采用设备变化",
+        "keepCurrentSpace": "已保留本机当前空间",
+        "leaveSpace": "已退出空间",
+        "stateChanged": "空间状态已变化"
+      },
+      "outcome": {
+        "stateChanged": "提交前空间状态发生了变化，下面显示当前实际结果。",
+        "alreadyCompleted": "这项变化已经在其他位置处理，下面显示实际完成的结果。"
+      },
+      "none": "无",
+      "verified": "已核验最新设备状态。",
+      "unverified": "操作已被接受，但最新设备资料暂时无法核验。",
+      "localStatus": {
+        "inSpace": "本机仍在原空间。",
+        "leftSpace": "本机已退出原空间，本地历史仍然保留。"
+      },
+      "usable": "可以继续同步：{{devices}}",
+      "separated": "不再相互同步：{{devices}}",
+      "continuing": "仍在原空间：{{devices}}",
+      "offlinePending": "部分设备当前离线，暂不宣称它们已经收到最终变化。",
+      "done": "完成"
+    },
+    "deviceTrust": {
+      "title": "选择这台手机要同步的设备",
+      "body": "{{source}} 提议更新设备列表。请选择要使用哪一份列表。",
+      "sheetTitle": "选择同步设备",
+      "sheetBody": "{{source}} 更新了设备列表。请选择这台手机接下来和哪些设备同步。",
+      "targets": "涉及设备：{{devices}}",
+      "apply": "采用 {{source}} 的设备列表",
+      "leave": "使用 {{source}} 的列表，并让这台手机退出同步",
+      "keep": "这台手机的设备列表",
+      "continues": "同步设备：{{devices}}",
+      "continuesSummary": "{{count}} 台设备继续同步",
+      "stops": "将不再同步：{{devices}}",
+      "requiresRejoin": "恢复同步时需要重新邀请：{{devices}}",
+      "changesTitle": "将发生的变化",
+      "noStops": "不会停止与任何设备同步。",
+      "none": "无",
+      "confirmKeepTitle": "这些设备将不再与这台手机同步",
+      "confirmKeepBody": "保持当前列表后，下面的设备需要重新接受邀请才能恢复同步。",
+      "confirmLeaveTitle": "这台手机将退出同步",
+      "confirmLeaveBody": "退出后，这台手机不再与当前设备列表同步，本地历史仍会保留。",
+      "confirmStopTitle": "这些设备将停止同步",
+      "confirmStopBody": "确认后，下面的设备将不再与这台手机同步。以后恢复同步时，需要重新邀请。",
+      "confirm": "确认",
+      "continue": "继续",
+      "chooseAction": "选择一个设备列表",
+      "applyAction": "采用 {{source}} 的列表",
+      "keepAction": "保留当前列表",
+      "reviewStopAction": "查看停止同步的设备",
+      "reviewLeaveAction": "查看退出影响",
+      "confirmKeepAction": "保持当前列表并停止同步",
+      "confirmStopAction": "确认并停止同步",
+      "confirmLeaveAction": "让这台手机退出同步",
+      "notificationTitle": "请核对设备变化",
+      "notificationBody": "打开 UniClip，核对哪些设备可以继续同步。",
+      "notificationReviewTitle": "请核对设备变化",
+      "notificationReviewBody": "打开 UniClip，选择哪些设备可以继续同步。",
+      "notificationUpgradeTitle": "有设备需要更新",
+      "notificationUpgradeBody": "打开 UniClip，查看当前空间状态。",
+      "notificationUnverifiableTitle": "设备资料需要处理",
+      "notificationUnverifiableBody": "打开 UniClip，查看当前空间状态。",
+      "notificationChannel": "设备变化",
+      "stateChanged": "设备状态已经变化，请核对最新结果。",
+      "error": "无法保存选择。当前已显示最新设备状态，请重试。",
+      "status": {
+        "waitingForLocalDecision": "等待你选择",
+        "unverifiable": "无法核验设备资料",
+        "upgradeRequired": "需要更新",
+        "updating": "正在更新空间",
+        "differentSpace": "不同空间",
+        "removed": "已移除",
+        "usable": "可同步",
+        "unknown": "状态不可用"
+      }
+    },
+    "convergence": {
+      "title": "同步状态",
+      "waiting": "正在等待空间中的设备完成同步。",
+      "pendingDevice": "等待同步",
+      "recoveryRequired": "同步需要恢复，请等待设备重新连接。",
+      "complete": "空间中的设备已完成同步。"
+    },
+    "leave": {
+      "action": "离开空间",
+      "confirm": "只有这台手机会退出，其他设备继续使用原空间。本地历史仍会保留；以后重新加入需要新的邀请。"
+    },
+    "switch": {
+      "title": "切换空间",
+      "description": "使用邀请码加入其他空间",
+      "unavailable": "设备资料暂时无法核验，暂时不能切换空间。请稍后重试。",
+      "confirmTitle": "切换空间",
+      "confirm": "这台设备将离开当前空间并加入新空间。本地历史会保留，之后只与新空间同步。",
+      "confirmAction": "确认切换"
+    },
+    "unreadableHistory": {
+      "title": "部分本地历史无法打开",
+      "body": "这些内容会继续以加密形式保留在本机，但暂时无法使用。其余历史会迁移到新空间。是否继续？",
+      "continue": "保留并继续"
+    },
+    "error": {
+      "title": "空间需要处理",
+      "deviceNameRequired": "请输入设备名称",
+      "passphraseRequired": "请输入空间口令",
+      "invitationCodeRequired": "请输入邀请码",
+      "invitationCodeInvalid": "请输入完整的 8 位邀请码",
+      "invitationNotFound": "这个邀请码不存在",
+      "invitationExpired": "这个邀请码已过期，请让对方重新生成",
+      "passphraseMismatch": "空间口令不正确",
+      "sponsorUnreachable": "暂时无法连接另一台设备",
+      "connectionTimedOut": "连接超时，请重试",
+      "invitationRejected": "另一台设备没有接受这次加入",
+      "serviceUnavailable": "连接服务暂时不可用，请稍后重试",
+      "connectionLost": "连接已中断，请重试",
+      "operationFailed": "操作失败,请检查输入后重试"
+    },
+    "manage": { "title": "空间操作" },
+    "advanced": { "title": "高级设置" },
+    "danger": { "title": "危险操作" }
+  }
+}

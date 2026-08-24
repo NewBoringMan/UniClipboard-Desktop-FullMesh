@@ -1,0 +1,51 @@
+[package]
+name = "uc-engine"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+description = "Stable cross-platform engine interface for UniClipboard hosts"
+publish = false
+
+[features]
+default = []
+dev-tools = ["dep:tracing-subscriber"]
+lan-compat = [
+  "dep:uc-mobile-lan",
+  "dep:uc-mobile-proto",
+  "uc-infra/lan-compat",
+]
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio-util = "0.7"
+tracing = "0.1"
+thiserror = "2.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+url = "2"
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+uc-application = { path = "../uc-application" }
+uc-core = { path = "../uc-core", features = ["task-registry"] }
+uc-infra = { path = "../uc-infra" }
+uc-mobile-lan = { path = "../../compatibility/uc-mobile-lan", optional = true }
+uc-mobile-proto = { path = "../../compatibility/uc-mobile-proto", optional = true }
+uc-observability-contract = { path = "../uc-observability-contract" }
+zeroize = "1.8"
+
+[dev-dependencies]
+cargo_metadata = "0.19.2"
+chrono = { version = "0.4", features = ["serde"] }
+diesel = { version = "2.3.5", features = ["sqlite"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uc-infra = { path = "../uc-infra", features = ["test-util"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true

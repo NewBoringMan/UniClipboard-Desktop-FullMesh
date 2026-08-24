@@ -1,0 +1,98 @@
+{
+  "empty": {
+    "unconfigured": {
+      "title": "尚未加入 P2P 空间",
+      "description": "使用邀请码加入空间即可继续同步。本地历史会继续保留。"
+    },
+    "connecting": {
+      "title": "正在连接…",
+      "description": "正在连接 {{space}} 中的设备。"
+    },
+    "online": {
+      "title": "剪贴板已同步",
+      "description": "在任意已配对设备上复制内容，就会出现在这里。"
+    },
+    "offline": {
+      "title": "{{space}} 中的设备暂时离线",
+      "description": "其他设备当前不可达，请检查它们的网络状态。"
+    },
+    "error": {
+      "title": "同步需要处理",
+      "description": "同步已暂停，请检查空间和网络状态。"
+    }
+  },
+  "topBar": {
+    "selectedCount": "已选择 {{n}} 项",
+    "deselectAll": "取消全选",
+    "searchPlaceholder": "搜索剪贴板",
+    "mySpace": "我的空间",
+    "openSpaceA11y": "打开我的空间",
+    "spaceUnconfigured": "尚未加入"
+  },
+  "a11y": {
+    "addContent": "添加内容",
+    "closeMenu": "关闭菜单",
+    "closeCamera": "关闭相机",
+    "switchCamera": "切换前后摄像头",
+    "toggleFlash": "切换闪光灯",
+    "takePicture": "拍照",
+    "startRecording": "开始录像",
+    "stopRecording": "停止录像"
+  },
+  "fab": {
+    "takePhoto": "拍照",
+    "pickImage": "相册",
+    "pickFile": "选择文件",
+    "uploadClipboard": "上传剪贴板",
+    "syncNow": "立即同步",
+    "photoMode": "照片",
+    "videoMode": "录像"
+  },
+  "toast": {
+    "copied": "已复制到剪贴板",
+    "copiedLocal": "已复制到本机",
+    "copiedAutoPushEnabled": "已复制，自动推送已开启",
+    "copyFailed": "复制失败",
+    "copiedPlainText": "已复制为纯文本",
+    "savedToGallery": "已保存到相册",
+    "saveFailed": "保存失败",
+    "savedFile": "已保存文件",
+    "deleted": "已删除",
+    "copiedSelected": "已复制所选内容",
+    "syncDone": "同步完成",
+    "syncFailed": "同步失败",
+    "sentToPeers": "已发送到其他设备",
+    "uploadFailed": "上传失败",
+    "savedLocally": "已保存到本地",
+    "p2pDelivery": {
+      "delivered": "已送达到其他设备",
+      "partial": "部分送达：送达 {{accepted}}，已存在 {{duplicate}}，离线 {{offline}}，失败 {{errored}}，等待 {{pending}}",
+      "offline": "已保存在本机，其他设备离线",
+      "failed": "已保存在本机，发送失败",
+      "pending": "已保存在本机，正在发送"
+    },
+    "pickFileFailed": "选择文件失败",
+    "pickImageFailed": "选择图片失败",
+    "cameraPermissionNeeded": "需要相机权限",
+    "micPermissionNeeded": "需要麦克风权限",
+    "takePhotoFailed": "拍照失败",
+    "takeVideoFailed": "录像失败",
+    "cameraUnavailable": "相机不可用"
+  },
+  "detail": {
+    "placeholderTitle": "选择一项查看详情",
+    "placeholderDesc": "从左侧列表点选任意条目，在这里查看完整内容并操作。",
+    "fromDevice": "来自 {{device}}",
+    "unknownDevice": "本机",
+    "quickActions": {
+      "select": "选择",
+      "open": "打开",
+      "save": "保存"
+    },
+    "close": "关闭详情"
+  },
+  "rail": {
+    "filters": "筛选",
+    "all": "全部"
+  }
+}

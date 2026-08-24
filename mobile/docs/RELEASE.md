@@ -1,0 +1,292 @@
+# Release & Versioning Guide
+
+This document describes the versioning policy, upstream-sync workflow, and
+release process for UniClip.
+
+## Versioning Policy
+
+UniClip uses **two independent axes**, so our fast release cadence does not keep
+re-triggering iOS App Store / TestFlight review:
+
+1. **Marketing version** — `expo.version`, a 3-segment `MAJOR.MINOR.PATCH`
+   ([SemVer](https://semver.org/)), independent from the upstream
+   `Jeric-X/syncclipboard-mobile` project. This maps to the iOS
+   `CFBundleShortVersionString`. **Apple re-reviews whenever this changes**, so
+   it is bumped **deliberately and rarely** — at feature milestones, not every
+   release.
+   - **PATCH (`1.0.X`)** — bug fixes only, no user-visible behavior change.
+   - **MINOR (`1.X.0`)** — new features, backward compatible.
+   - **MAJOR (`X.0.0`)** — breaking changes (protocol break, removed feature,
+     data-format migration).
+2. **Build counter** — a single monotonic integer bumped **every** release. It
+   drives both `expo.android.versionCode` and `expo.ios.buildNumber` (kept
+   equal), and is the 4th segment of the git tag. On iOS only the
+   `CFBundleVersion` changes → no review. Our fast cadence rides on this axis.
+
+> **Snapshot point:** version `1.0.11` (versionCode 152) was the alignment
+> snapshot where UniClip last shared a version number with upstream. From then
+> on the two axes evolve independently.
+
+### Build Counter Rule
+
+The build counter **must increase monotonically** across every published
+artifact, including betas and marketing-version bumps (it is never reset). The
+rule is simple:
+
+> Every published tag bumps the build counter by 1;
+> `versionCode` and `ios.buildNumber` are both set to it.
+
+| Release            | expo.version (iOS marketing) | build counter | Android versionName | iOS review? |
+| ------------------ | ---------------------------- | ------------- | ------------------- | ----------- |
+| v1.3.0.156         | 1.3.0 (frozen)               | 156           | 1.3.0.156           | no          |
+| v1.3.0.157         | 1.3.0 (frozen)               | 157           | 1.3.0.157           | no          |
+| v1.4.0.158         | 1.4.0 (bumped)               | 158           | 1.4.0.158           | **yes**     |
+| v1.4.0.159         | 1.4.0 (frozen)               | 159           | 1.4.0.159           | no          |
+| v1.4.0.160-alpha.1 | 1.4.0 (frozen)               | 160           | 1.4.0.160-alpha.1   | no          |
+
+### Android self-update depends on the tag — do NOT change its shape
+
+Android is sideload-only: the in-app updater (`src/services/UpdateService.ts`)
+compares the **installed `versionName`** against the **latest GitHub release
+tag**. Two hard constraints follow:
+
+- The Android `versionName` MUST carry the build counter as a 4th segment
+  (`1.3.0.156`), followed by `-alpha.N` for an Alpha release. This is injected at prebuild by
+  `plugins/withAndroidBuildVersionName.ts` (from `expo.version` +
+  `expo.android.versionCode`). Without it, a user already on the newest build
+  compares `1.3.0` against tag `v1.3.0.156` and sees a **permanent false
+  "update available"**.
+- The tag MUST be a form the app accepts: `vX.Y.Z.B` or
+  `vX.Y.Z.B-alpha.N`. Separators like `v1.3.0-b5` or `v1.3.0+5` **fail to parse** and
+  silently disable update detection.
+
+### Tag Naming
+
+- **Stable:** `vX.Y.Z.B` (e.g. `v1.3.0.156`) — the `.B` is the build counter.
+- **Alpha:** `vX.Y.Z.B-alpha.N` (e.g. `v1.3.0.156-alpha.1`).
+
+An Alpha tag publishes an Android test build and an iOS TestFlight build. iOS
+always reads its marketing version from `app.json` `expo.version` (three
+segments only), so TestFlight shows `1.3.0 (156)` rather than an unsupported
+`1.3.0-alpha` version. The Alpha label remains in the release tag and the
+TestFlight testing notes.
+
+## Localized Changelog Format
+
+Every release is recorded in two files:
+
+- `CHANGES.md` contains Simplified Chinese notes.
+- `CHANGES.en.md` contains the matching English notes.
+
+The first line of both top sections is the same bare tag (`vX.Y.Z.B`). Keep it
+unchanged: `npm run release:validate` rejects a release if either tag does not
+match `app.json`, if the two files drift apart, or if either top section cannot
+produce release notes. Everything below the tag, up to the next tag line, is the
+notes body for that release.
+
+Each language ships one shared changelog for iOS and Android.
+`scripts/release-notes.mjs` splits each top block with three optional headings:
+
+- `### 通用` in `CHANGES.md` or `### Common` in `CHANGES.en.md` applies to both
+  platforms.
+- `### iOS` applies only to iOS.
+- `### Android` applies only to Android.
+
+The generator produces:
+
+- **Versioned client changelogs:** committed files named
+  `changelogs/vX.Y.Z.B.<platform>.<language>.md`, where `platform` is `android`
+  or `ios` and `language` is `zh` or `en`. Each file contains common notes plus
+  notes for that platform. The Android updater fetches the file from the exact
+  release tag; it does not read the GitHub Release body. Non-Chinese app
+  languages currently use the English file.
+- **GitHub Release body:** visible `[zh-CN] 简体中文` and `[en] English`
+  sections for people viewing the release page, each containing Android and iOS
+  notes.
+- **TestFlight "What to Test":** Chinese iOS notes for `zh-Hans` and English
+  iOS notes for `en-US`. The publishing script updates existing localizations,
+  creates either one when missing, and reports request failures only after
+  attempting both.
+
+Run `npm run changelog:generate` after editing the top CHANGES blocks and commit
+all four generated files. `npm run release:validate` rejects missing or stale
+client changelog files before the release tag can be created.
+
+Bullets may still carry a provenance tag (`[uc]` for UniClip-specific changes,
+`[upstream]` for changes ported from `Jeric-X/syncclipboard-mobile` /
+`Jeric-X/SyncClipboard`, with a commit/PR ref when possible).
+
+Run `node scripts/release-notes.mjs --print` locally to preview both languages
+and both platforms before pushing. `npm run release:validate` performs the same
+parsing check without writing release artifacts.
+
+### Example
+
+`CHANGES.md`:
+
+```
+v1.3.0.158
+
+### 通用
+- 修复：完成配对后未正确接入待处理的连接
+
+### iOS
+- 功能：保存文件时可自行选择保存位置
+```
+
+`CHANGES.en.md`:
+
+```
+v1.3.0.158
+
+### Common
+- Fix: Pending connections are adopted after pairing
+
+### iOS
+- Feature: Choose where to save files
+```
+
+**Backward compatible:** a flat block with no sub-headings still routes bullets
+to both platforms. Legacy inline platform tags are also still supported.
+
+## Upstream Sync Workflow
+
+UniClip is a **clean-room re-implementation** of the SyncClipboard protocol
+(TypeScript / Expo), not a git-level fork of the upstream Android app. Merging
+is therefore manual.
+
+Routine:
+
+1. **Watch** `Jeric-X/syncclipboard-mobile` and `Jeric-X/SyncClipboard` on
+   GitHub for new releases.
+2. **Triage** new commits since the last sync. Focus on:
+   - **Protocol-layer** changes (API fields, signatures, file chunking,
+     SignalR contracts) — must port; servers are shared.
+   - **Cross-platform logic** bugs (sync race conditions, retry logic) —
+     usually applicable.
+   - Android-platform fixes (background services, permissions) — port only if
+     UniClip exhibits the same issue.
+   - **Skip** anything specific to upstream's stack (MAUI, .NET, their UI).
+3. **Port manually** into UniClip's corresponding module
+   (`modules/*`, `src/services/*`, plugins, etc.). Do not `cherry-pick` —
+   technical stacks differ.
+4. **Commit** with an upstream reference, e.g.:
+
+   ```
+   fix: handle sync retry after token refresh
+
+   Ref: Jeric-X/syncclipboard-mobile@abc1234
+   ```
+
+5. **Record** the change in `CHANGES.md` and `CHANGES.en.md` under the current
+   development version, prefixed with `[upstream]`.
+
+### Tracking the Sync Point
+
+When a UniClip release ships, optionally record the upstream version it has
+been synced to in the release notes or the in-app About page, e.g.
+"Tracked upstream: v1.0.13 (2026-06-XX)". UniClip's own version stays
+independent.
+
+## Release Workflow
+
+### Pre-release Checklist
+
+- [ ] All upstream fixes intended for this release have been ported and
+      recorded in both changelog files.
+- [ ] Alpha build (if one was published) has been verified on a physical
+      device, including any long-running scenarios mentioned in the
+      changelog.
+- [ ] `CHANGES.md` and `CHANGES.en.md` top sections contain equivalent final
+      release notes and start with the same full tag `vX.Y.Z.B`.
+- [ ] `npm run changelog:generate` was run and all four matching files under
+      `changelogs/` are committed.
+- [ ] `app.json` build metadata was bumped with the scripts below (never
+      hand-edit `versionCode` / `buildNumber` — that risks the two drifting).
+- [ ] Working tree is clean.
+- [ ] The release metadata commit has been pushed to `main`.
+
+### Steps
+
+Pick the axis. **Most releases are build-only** (marketing version frozen, no
+iOS review):
+
+```sh
+# 1a. Build-only release (frequent): bump the counter, keep expo.version frozen.
+npm run release:build            # add --dry-run first to preview
+
+# 1b. Alpha release: creates the next monotonic build and Alpha tag.
+npm run release:alpha             # add --dry-run first to preview
+
+# 1c. OR marketing-version release (rare, re-triggers iOS review):
+npm run release:version -- 1.4.0
+```
+
+Both scripts edit `app.json` and print the derived tag. Then:
+
+```sh
+# 2. Add matching "vX.Y.Z.B" sections to CHANGES.md and CHANGES.en.md,
+#    then generate the per-platform client changelogs.
+npm run changelog:generate
+
+# 3. Commit and push the release metadata. Do not create or push the tag.
+git add app.json CHANGES.md CHANGES.en.md changelogs
+git commit -m "chore(release): X.Y.Z.B"
+git push origin main
+```
+
+In GitHub Actions, open `build`, choose **Run workflow** on `main`, enable
+`publish_release`, and leave the iOS dev-build inputs empty. The workflow then:
+
+1. Validates that Android/iOS build counters and both changelog files describe
+   the same release, and that both top sections can generate release notes.
+2. Runs style checks, unit tests, and both Android and iOS builds.
+3. Creates the derived tag only after every check and both builds succeed.
+4. Uploads the same validated iOS artifact to TestFlight.
+5. Publishes a GitHub Release with `armeabi-v7a`, `arm64-v8a`, `x86_64`, and
+   universal APKs plus the universal AAB supported by the unified engine release.
+6. Uploads the immutable Android APKs to Cloudflare R2 and registers a Ready release in FlareRelease.
+7. Leaves Stable and Beta unchanged until a maintainer explicitly promotes the release in FlareRelease.
+
+FlareRelease registration uses the `UniClipboard` organization's
+`FLARE_RELEASE_ACCESS_CLIENT_ID` and `FLARE_RELEASE_ACCESS_CLIENT_SECRET`
+GitHub Actions secrets. The organization secrets must grant this repository
+access. Registration never selects a channel; release approval and channel
+changes remain explicit operations in FlareRelease.
+
+Directly pushing a `v*` tag does not publish a release. If a publishing job
+fails after the tag was created, use **Re-run failed jobs** on the same Actions
+run so successful builds and destinations are not repeated.
+
+The Android workflow calls `scripts/build-android-release.sh`. It builds the
+universal APK and AAB with `-PucUniversalOnly`, where the three supported ABIs
+are filtered at the application level, then performs an App-only clean second
+invocation for the three standalone split APKs. It prepares Worklets and
+Reanimated Prefab packages before cleaning the App, because a global Gradle
+clean can leave AGP with a stale missing-Prefab up-to-date state. Do not
+collapse these Gradle invocations:
+AGP 8.12 can emit incomplete split archives when application `abiFilters` and
+enabled ABI splits are combined. `scripts/verify-android-release.sh` rejects
+missing manifests, invalid V2 signatures, unexpected SDK metadata, unsupported
+ABI directories, and packages without the unified engine library.
+
+### Alpha Release
+
+Run `npm run release:alpha` to create the next build metadata and the next
+Alpha sequence. It prints a tag such as `v1.3.0.166-alpha.1`; use that exact
+tag as the first line of both changelog files, then use the normal manual
+`publish_release` flow. Android Alpha installs automatically use the test
+update channel on first launch, so they receive the next Alpha or stable build.
+CI marks Alpha tags as prereleases and uploads the iOS build to TestFlight.
+
+## Identifier Reference
+
+| Field            | Value                      |
+| ---------------- | -------------------------- |
+| Android package  | `app.uniclipboard.android` |
+| iOS bundle       | `app.uniclipboard.ios`     |
+| App display name | `UniClip`                  |
+| Expo slug        | `uniclip`                  |
+
+These are independent namespaces from upstream. UniClip can be installed
+alongside any other SyncClipboard-protocol client on the same device.

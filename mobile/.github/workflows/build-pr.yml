@@ -1,0 +1,19 @@
+name: build-pr
+
+on:
+  pull_request:
+
+jobs:
+  code-style:
+    uses: ./.github/workflows/code-style.yml
+
+  unit-tests:
+    uses: ./.github/workflows/test.yml
+
+  android-build:
+    needs: [code-style, unit-tests]
+    uses: ./.github/workflows/android-build.yml
+
+  ios-build-check:
+    needs: [code-style, unit-tests]
+    uses: ./.github/workflows/ios-build-check.yml
