@@ -78,7 +78,7 @@ try {
   # interactive root-trust confirmation on a hosted runner, so use certutil's
   # explicit force/non-interactive path and remove the root in finally. End
   # users still import the public certificate into TrustedPeople for sideloading.
-  & certutil.exe -user -addstore -f Root $certificatePath
+  & certutil.exe -user -f -silent -addstore Root $certificatePath
   if ($LASTEXITCODE -ne 0) { throw "certutil root import failed with exit code $LASTEXITCODE" }
   $rootInstalled = $true
   & $signtool sign /fd SHA256 /f $pfx /p ([System.Net.NetworkCredential]::new('', $password).Password) $artifact
@@ -89,7 +89,7 @@ try {
   Remove-Item $pfx -Force -ErrorAction SilentlyContinue
   Remove-Item "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
   if ($rootInstalled) {
-    & certutil.exe -user -delstore Root $certificate.Thumbprint | Out-Null
+    & certutil.exe -user -f -silent -delstore Root $certificate.Thumbprint | Out-Null
   }
 }
 
