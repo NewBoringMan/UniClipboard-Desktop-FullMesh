@@ -28,6 +28,8 @@ describe('FullMesh Windows package matrix', () => {
     expect(script).toContain("ValidateSet('x64', 'arm64')")
     expect(script).toContain('New-SelfSignedCertificate')
     expect(script).toContain('Export-Certificate')
+    expect(script).toContain('certutil.exe -user -addstore -f Root')
+    expect(script).toContain('certutil.exe -user -delstore Root')
     expect(script).toContain('signtool verify')
     expect(script).toContain('Remove-Item $pfx')
 
