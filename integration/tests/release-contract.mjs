@@ -36,6 +36,8 @@ for (const gate of [
   'android-emulator-runner',
   'prepare-local-unified-engine-core.sh engine',
   "destination 'generic/platform=iOS Simulator'",
+  "destination 'generic/platform=iOS'",
+  'ios-device-unsigned-testing.xcarchive.zip',
   'linux/amd64,linux/arm64',
   'test-msix-lifecycle.ps1',
   'createUpdaterArtifacts":false',
