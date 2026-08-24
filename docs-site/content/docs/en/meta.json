@@ -1,0 +1,13 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "getting-started",
+    "core-features",
+    "mobile",
+    "cli",
+    "guides",
+    "reference",
+    "help"
+  ]
+}

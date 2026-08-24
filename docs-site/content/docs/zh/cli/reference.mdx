@@ -1,0 +1,262 @@
+---
+title: 命令参考
+description: uniclip 全部子命令 —— 成员、发送/监听、搜索、blob、移动端同步与退出码。
+---
+
+这是 `uniclip` 的完整子命令参考。第一次用 CLI？先看 [CLI 概览](../cli/getting-started)。
+
+## 成员
+
+| 命令                      | 返回内容                                                                                                        |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `uniclip members`         | 本空间的成员 —— 本机加上已配对的对端 —— 及各对端的最近一次可达状态：`{name} ({online \| offline \| unknown})`。 |
+| `uniclip members --probe` | 同上，但会先主动 ping 每个已配对对端以刷新状态（会多一次网络往返）。                                            |
+
+`uniclip devices` 是 `uniclip members` 的别名。两个写法都支持 `--json`，方便脚本调用。
+
+### 加入请求
+
+| 命令                     | 作用                                             |
+| ------------------------ | ------------------------------------------------ |
+| `uniclip join --no-wait` | 记录等待中的加入请求后立即返回，不等待最终结果。 |
+| `uniclip join status`    | 查看当前加入请求及其 Engine 状态。               |
+| `uniclip join cancel`    | 请求取消当前仍在等待的加入。                     |
+
+不带 `--no-wait` 时，`uniclip join` 会等待最终结果。Ctrl-C 只停止本地等待；
+确实要取消请求时应使用 `join cancel`。
+
+### 设备信任变化
+
+| 命令                          | 作用                                             |
+| ----------------------------- | ------------------------------------------------ |
+| `uniclip member trust status` | 查看当前设备组变化、变化 ID 以及每种选择的影响。 |
+| `uniclip member trust apply`  | 确认后应用等待处理的设备组变化。                 |
+| `uniclip member trust keep`   | 保留当前设备组，不应用等待处理的变化。           |
+
+脚本和 JSON 调用必须传入 `--change <CHANGE-ID>`，确保选择对应刚刚查看的变化。
+如果应用变化会移除本机，还必须传入 `--confirm-local-removal`。
+
+### 按成员设置同步
+
+| 命令                                         | 作用                                     |
+| -------------------------------------------- | ---------------------------------------- |
+| `uniclip member sync show <DEVICE>`          | 查看一个成员的发送、接收和内容类型设置。 |
+| `uniclip member sync set <DEVICE> [OPTIONS]` | 只修改命令中明确给出的设置。             |
+
+`<DEVICE>` 可以是设备 ID；在交互终端中也可以使用没有歧义的设备名称。
+`set` 支持 `--send on|off`、`--receive on|off`，以及逗号分隔的
+`--send-types` / `--receive-types`；用 `all` 或 `none` 表示全部类型或不选任何类型。
+
+## 发送与监听
+
+```bash
+# 把一段文本发给所有在线已配对设备
+uniclip send "hello from the CLI"
+
+# 或者从 stdin 读取
+echo "from a heredoc" | uniclip send
+
+# 限定 fan-out 到指定设备（可重复）
+uniclip send "scoped message" --peer DEVICE_ID_A --peer DEVICE_ID_B
+
+# 重新分发一条本地已捕获的条目（不读 stdin / positional text）。
+# 不带 `--peer` 时默认目标为 trusted peer 中尚未收到该条目的差集。
+uniclip send --resend <ENTRY_ID>
+
+# 实时打印收到的剪贴 payload（Ctrl-C 停止）
+uniclip watch
+```
+
+`--resend` 只能重发 **本地捕获** 且 payload 仍在缓存里的条目。
+从远端 peer 同步进来的条目不能从本机 resend；可叠加 `--peer ...` 显式指定 fan-out 目标。
+
+`uniclip watch` 是 **诊断观察器**：它会打印首个文本表示（图片型 payload 则按 representation 摘要展示），
+但 **不会** 写入系统剪贴板 —— 写系统剪贴板是守护进程的职责。
+
+### 发送和接收文件
+
+```bash
+# 发送端：通过守护进程的 blob 管线把文件分发给已配对 peer。
+# 守护进程负责 blob 存储和传输 —— dispatch 确认后 CLI 即可退出。
+uniclip send -f ./big-file.bin
+
+# 接收端：等待首个入站文件，从守护进程的缓存中导出字节，
+# 写入磁盘（默认 cwd，--out 指定其他目录）。Ctrl-C 停止等待。
+uniclip recv --out ./inbox
+```
+
+`send -f` 与 positional text 和 `--resend` 互斥。
+守护进程负责 blob 存储和 peer 间传输，CLI 在 dispatch 确认后即可退出。
+
+### 读取已同步的条目
+
+`recv` 等待**下一个**入站文件。要读取守护进程历史里**已经存在**的内容
+（无头 / SSH 机器没有系统剪贴板可粘贴时的常见场景），用 `get`，它会立即返回。
+
+```bash
+# 最新一条可用条目（文本/链接打到 stdout）
+uniclip get
+
+# 最新一条指定类型：image | file | text | link
+uniclip get --type image
+
+# 按 id 取指定条目（id 来自 `uniclip search`），落地到目录
+uniclip get --id <ENTRY_ID> --out ./inbox
+
+# 仅列出最近条目，不取回
+uniclip get --list -n 20
+```
+
+输出约定：**文本 / 链接**内容打到 stdout（可管道）；仅当 stdout 是交互式终端时才补一个尾换行，因此管道或重定向输出保持字节精确；**图片 / 文件**字节写入
+`--out`（目录，默认 per-user 缓存目录）并把绝对路径打到 stdout，或用 `--out -`
+直接写到 stdout。状态行走 stderr，stdout 保持干净。与 `recv` 不同，`get` 不阻塞。
+
+## 搜索
+
+`uniclip search` 是 GUI 仪表盘搜索框背后那个加密全文索引的命令行入口。
+
+```bash
+uniclip search status                    # 索引是否就绪 / 是否在建
+uniclip search rebuild                   # 从历史重建索引（同步执行）
+uniclip search "报告"                    # 基本查询
+uniclip search "报告" \
+    --type text --ext md \
+    --limit 20 --detailed
+uniclip search "报告" \
+    --from-ms 1710000000000 --to-ms 1710100000000
+uniclip search "报告" \
+    --source-device "Laptop"             # 只看来自该设备的内容
+```
+
+`--source-device` 按「内容来自哪台设备」过滤，接受设备名（大小写无关）或设备 id，可重复多次；运行 `uniclip members` 可查看可用的设备名。`--detailed`（以及 `--json`）的输出里会带上每条结果的 `source` 设备 id。
+
+`rebuild` 是同步命令，重建完成才返回；脚本里抓诊断快照很有用。
+
+## Blob（大负载）诊断
+
+> **注意：**`blob`、`probe`、`dev` 子命令仅在开发构建（`dev-tools` feature）中可用，release 二进制不包含。
+
+`uniclip blob` 是分块 blob 管线的命令行入口，参见
+[同步内容 — 大负载（文件与大图）](../core-features/sync#大负载文件与大图)。
+
+```bash
+# 把本地文件作为加密 blob 发布，输出对应 ticket
+uniclip blob publish ./sample.bin
+
+# 用 ticket + entry id 把 blob 拉到本地
+uniclip blob fetch <TICKET> --entry-id <ENTRY_ID> --out ./restored.bin
+```
+
+适合排查文件同步失败、或验证对端能否访问 blob 存储。
+
+## 移动端同步
+
+`uniclip mobile ...` 是移动端同步功能的命令行入口，覆盖
+**设备 → 移动端同步** 面板的所有动作。协议层文档见
+[移动端 LAN API](../reference/mobile-api)。
+
+```bash
+# 一键向导：开启功能、配置 LAN 监听器、注册一台 iPhone，打印
+# 安装 QR 码与一次性密码。
+uniclip mobile setup
+
+# 只读命令（daemon 在跑时也可以调）
+uniclip mobile status            # 综合视图：功能 + LAN + 已配对设备
+
+# 已配对设备管理
+uniclip mobile add --label "My iPhone" \
+    [--username my_user] [--password-stdin]
+uniclip mobile revoke <device-id>
+
+# 进阶监听器配置（写命令 —— 必须先停 daemon）。`setup` 已覆盖常用场景，
+# 需要手动改地址或反代前置时才用这一组。
+uniclip mobile network interfaces
+# LAN 形态：宣告内网 IPv4 → 安装 URL 为 http://<IP>:<port>
+uniclip mobile network set --ip <LAN_IPV4> [--port 42720] --accept-network-risk
+# 反代形态：宣告完整 base URL → 安装 URL/二维码指向 HTTPS 前端（如 Caddy），
+# 监听器本身仍是内网明文 HTTP
+uniclip mobile network set --url https://clip.example.com --accept-network-risk
+uniclip mobile network off       # 只关 LAN 监听器
+
+# 把整个功能彻底关掉（总开关 + 监听器都关；已配对设备记录保留，
+# 想清掉用 `revoke`）
+uniclip mobile disable
+```
+
+行为约定：
+
+- **写命令在同 profile daemon 跑着时会被拒绝。** 跑 `setup`、`add`、
+  `network set` 等之前先 `uniclip stop` / 退掉 GUI。读命令（`status`）在
+  daemon 跑着时也可以。
+- **`--json` 隐含 non-interactive。** 不会出任何交互提示。`setup` 在
+  non-interactive / JSON 模式下必须显式给 `--label`、`--accept-network-risk`；
+  `--ip` / `--port` 是可选的高级覆盖项（不给则二维码自动携带所有检测到的
+  网卡）；`--username` / `--password-stdin` 仍可选，缺省走自动生成。
+- **`--password-stdin`** 从 stdin 读取一行作为密码。用它从密码管理器
+  或 CI 里管道喂密码，避免泄漏到 shell history。
+- **默认端口 `42720`**（SPEC §3.2）。daemon socket 永远 bind 在
+  `0.0.0.0:<port>`，`--ip` 只决定打印到安装 URL 的 IPv4。
+- **`network set` 必须二选一给出 `--ip <IP>` 或
+  `--url <URL>`。** `--ip` 得到 LAN 形态
+  `http://<IP>:<port>`；`--url` 写入完整 base URL（scheme +
+  host + 可选 port，如 `https://clip.example.com`），让安装 URL / 二维码
+  指向 TLS 反向代理（Caddy、nginx 等），而监听器本身仍是内网明文 HTTP。
+  两者互斥，设一个会清掉另一个；`mobile status` 会反映当前生效的那个。
+- 还有一组 **debug** 子命令（`uniclip mobile debug`），从 `--help`
+  里隐藏 —— 仅供开发与 E2E 脚本使用（绕过 HTTP，直接打 facade），可能
+  在不发版本说明的情况下变化。
+
+完整的端到端配置教程（监听器风险提示、iOS 快捷指令安装、密码轮换）见
+[移动端同步指南](../core-features/mobile-sync)。
+
+## 调试与日志导出
+
+```bash
+uniclip debug status                       # 当前是否开启持久化调试日志？
+uniclip debug on                           # 开启更详细的本地日志
+uniclip debug off                          # 恢复正常日志档位
+uniclip debug export-logs                  # 把最近 24h 打包到下载目录
+uniclip debug export-logs --since-hours 6  # 收窄时间窗口
+```
+
+`debug on` / `off` 会把更详细的日志档位持久化，跨重启生效；`status`
+报告当前生效的档位，以及是否还需要重启才能完全生效。剪贴板内容仍然
+不会被记录。
+
+`export-logs` 把最近时间窗口（默认 24h）内的 GUI、daemon、CLI 日志打
+成一个 zip 放到下载目录 —— 这是收齐 issue 报告所需材料最快的方式。
+GUI 里在 **设置 → 常规** 下有同样的操作。
+
+## 升级检测游标
+
+```bash
+uniclip upgrade            # 不带子命令时打印状态
+uniclip upgrade status     # 与不带子命令时等价
+uniclip upgrade ack        # 把游标推进到当前构建版本
+```
+
+查看或推进升级检测游标 —— 用于手动验证升级模块。普通用户基本用不到。
+
+## 隐藏命令
+
+下列命令存在，但刻意从 `uniclip --help` 中隐藏：
+
+- `uniclip probe ...` —— 剪贴诊断子命令组（替代旧的 `clipboard-probe` 独立二进制）。
+  CLI 中 **唯一** 写系统剪贴板的入口（仅限 `probe restore`），仅供开发与 E2E 调试。
+- `uniclip dev seed-clipboard --text <TEXT>` —— switch-space 数据完整性测试用的种子写入。
+- `uniclip dev dump-clipboard --limit <N>` —— 调试用，打印解密后的历史。
+- `uniclip dev capture-files --path <PATH>` —— 通过真实的本地捕获流程捕获一个或多个文件/目录，并打印落盘的文件集清单。可重复传入 `--path` 以混合选择多个路径。`--max-members` 和 `--max-bytes` 只临时覆盖本次捕获的文件集上限，不会写回 profile 的持久化设置。
+- `uniclip dev pairing ...` —— 配对邀请的诊断子命令组：`addrs` 列出经过产品过滤后的候选地址，`issue --addr <IP>` 把邀请约束在某一个本机 IP 上。daemon 跑着时会被拒绝；仅供开发与排查 [配对在虚拟网卡环境下打不通](../help/troubleshooting#配对失败) 这类问题使用。
+- `uniclipd` —— 后台 daemon，现在是**独立的二进制**（不再是 `uniclip daemon` 子命令）。`uniclip start` 和桌面应用会自动拉起它；你会在 `ps` 中看到它，但不要直接运行。
+
+这些不会出现在 shell 补全或 `--help` 中，并且可能在不发版本说明的情况下变化。
+这里列出来只是为了让你在 `ps` 或提交历史中看到时不会以为见鬼了。
+
+## 退出码
+
+`uniclip` 使用稳定的退出码（在 `src/exit_codes.rs` 中定义）。`0` 表示成功，非零值对应不同的失败类别
+（配置、网络、配对等）且跨版本保持稳定。脚本应基于退出码判断成败，而不是解析人类可读输出。
+
+`uniclip get` 额外使用 `6`（没有条目匹配 selector）和 `7`（条目存在但 payload 不可用——`Lost` 或尚未下载，需在源设备重发）。
+
+最新的子命令列表请直接运行 `uniclip --help` —— 二进制自带的 help 是权威来源。

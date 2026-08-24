@@ -1,0 +1,226 @@
+---
+title: 自建 UniClipboard 中继
+description: 使用 UniClipboard 官方中继镜像完成部署，并让自己的设备接入。
+---
+
+UniClipboard 可以使用你自己管理的中继，而不是默认公共中继。推荐方案是通过 Docker
+Compose 部署官方 `ghcr.io/uniclipboard/relay` 镜像，由 Caddy 自动提供 HTTPS，中继本身只在
+容器内部网络开放。
+
+每台设备都需要填写中继地址和同一个访问令牌。UniClipboard 的后台服务重启后，新配置才会生效。
+
+## 中继的作用
+
+两台设备无法直接连接时，中继负责转发已经加密的流量。它能看到连接信息，以及加密流量的大小和
+时间，但无法读取剪贴板内容、口令、空间 MasterKey 或成员列表。
+
+自建中继可以让你控制服务器的位置、可用性和带宽，但不能替代设备发现。首次配对仍会使用
+UniClipboard 的 rendezvous 服务。
+
+完整的安全说明见[配对与同步：中继能看到什么](./pairing#中继看到的-vs-对端看到的)。
+
+## 前置条件
+
+- 一台有公网地址的 Linux 服务器，并已安装 Docker Engine 和 Docker Compose v2
+- 一个指向该服务器的域名，例如 `relay.example.com`
+- 在主机防火墙和云平台防火墙中开放 TCP `80` 和 `443` 端口
+- OpenSSL，只用于生成一次访问令牌
+
+如果域名存在 `AAAA` 记录，服务器也必须能通过 IPv6 访问。继续之前请删除已经失效的 DNS 记录。
+
+<Callout type="warn">
+  下面创建的 `.env` 文件包含中继访问令牌。请保持其权限为 `0600`，不要提交到仓库，也不要分享给
+  他人。任何拿到令牌的人都可以使用你的中继。
+</Callout>
+
+## 部署
+
+### 1. 创建部署目录和令牌
+
+先把 `relay.example.com` 换成你的真实域名，再执行：
+
+```bash
+mkdir -p uniclipboard-relay
+cd uniclipboard-relay
+umask 077
+printf 'RELAY_DOMAIN=relay.example.com\nUC_RELAY_TOKEN=%s\n' \
+  "$(openssl rand -hex 32)" > .env
+chmod 600 .env
+```
+
+### 2. 创建 `docker-compose.yml`
+
+```yaml
+services:
+  relay:
+    image: ${RELAY_IMAGE:-ghcr.io/uniclipboard/relay:latest}
+    restart: unless-stopped
+    environment:
+      UC_RELAY_TOKEN: ${UC_RELAY_TOKEN:?set UC_RELAY_TOKEN in .env}
+    expose:
+      - '3340'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?set RELAY_DOMAIN in .env}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:
+```
+
+中继的 `3340` 端口只对这个 Compose 项目中的其他容器可见。公网只开放 Caddy 的 HTTP 和 HTTPS
+端口。
+
+### 3. 创建 `Caddyfile`
+
+```text
+{$RELAY_DOMAIN} {
+  reverse_proxy relay:3340
+}
+```
+
+Caddy 会自动申请和续期证书。这份配置同时支持中继所需的 WebSocket 连接，并会保留
+`Authorization` 请求头。
+
+### 4. 启动服务
+
+```bash
+docker compose config
+docker compose pull
+docker compose up -d
+```
+
+首次启动时，Caddy 需要申请证书，可能要稍等一会儿。
+
+### 5. 验证部署
+
+```bash
+docker compose ps
+curl --fail --show-error https://relay.example.com/healthz
+docker compose logs -f relay
+```
+
+请把 `curl` 命令中的域名换成你的真实域名。健康检查应返回带有 `"status":"ok"` 的 JSON，
+`docker compose ps` 中的中继服务应显示为健康。
+
+按 `Ctrl+C` 只会停止查看日志，容器会继续运行。
+
+## 接入 UniClipboard
+
+在每台设备上重复以下步骤：
+
+1. 打开 **设置 -> 网络 -> 自定义中继节点**。
+2. 添加中继地址，例如 `https://relay.example.com`，不要添加端口或路径。
+3. 在服务器上打开 `.env`，把 `UC_RELAY_TOKEN=` 后面的内容复制到访问令牌输入框。
+4. 点击 **测试可用性**。
+5. 点击 **保存中继节点**，出现提示后再点 **立即重启**。
+
+UniClipboard 不会再次显示已经保存的令牌。需要更换时，必须明确输入新令牌并重新保存。
+
+<Callout type="info">
+  自定义中继不会在设备间同步。每台设备都要分别配置地址和令牌。删除全部自定义中继即可恢复使用默认
+  公共中继。
+</Callout>
+
+## 更新或固定镜像
+
+正在运行的服务器不会自动获得 `latest` 的更新，需要手动拉取：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+如果希望每次部署都使用完全相同的镜像，可以在 `.env` 中把 `RELAY_IMAGE` 设为
+[UniClipboard 中继镜像页面](https://github.com/UniClipboard/relay/pkgs/container/relay)提供的版本标签或
+镜像摘要：
+
+```dotenv
+RELAY_IMAGE=ghcr.io/uniclipboard/relay@sha256:YOUR_IMAGE_DIGEST
+```
+
+修改后再次执行 `docker compose pull` 和 `docker compose up -d`。
+
+## 使用已有反向代理
+
+你也可以复用 nginx、Caddy、Traefik 或其他 HTTPS 反向代理，不运行上面的 Caddy 服务。反向代理
+必须满足以下要求：
+
+- 使用受公网信任的证书提供 HTTPS
+- 支持 WebSocket 升级
+- 保留 `Authorization` 请求头
+- 把请求转发到中继的 `3340` 端口
+
+如果反向代理直接运行在宿主机上，把中继服务中的 `expose` 换成仅本机可访问的端口映射：
+
+```yaml
+ports:
+  - '127.0.0.1:3340:3340'
+```
+
+然后代理到 `http://127.0.0.1:3340`。不要把 `3340` 端口开放到所有网络接口。
+
+浏览器客户端无法为 WebSocket 请求添加自定义鉴权请求头，因此会把令牌放在 `token` 查询参数中。
+本文提供的 Caddy 配置默认不开启访问日志。如果你在任何反向代理中启用访问日志，必须删除或遮蔽
+`token` 参数。
+
+## 本机有梯子时让 relay 走直连
+
+Clash、Mihomo、Surge 或 sing-box 等本机代理可能增加不必要的网络跳转，还可能限制中继速度。
+先检查当前网络能否直接访问中继：
+
+```bash
+curl --noproxy '*' --fail --show-error \
+  https://relay.example.com/healthz
+```
+
+如果检查成功，可以把中继域名加入直连规则。Clash 或 Mihomo 的配置示例：
+
+```yaml
+rules:
+  - DOMAIN-SUFFIX,relay.example.com,DIRECT
+  # ... 你原来的规则
+```
+
+只有当前网络确实能直连中继时，才应绕过代理。
+
+## 确认流量经过自建中继
+
+请把下面三项结合起来检查：
+
+- **可用性测试**：地址和令牌能通过 UniClipboard 的 **测试可用性**。
+- **服务器日志**：设备连接和同步时运行 `docker compose logs -f relay`。
+- **端到端测试**：让两台已配对设备处在无法直接连接的网络中完成同步，同时确认服务器出现中继活动。
+
+## 常见问题
+
+| 现象                                  | 排查方向                                                                                      |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Caddy 无法申请证书                    | 确认 DNS 指向当前服务器，TCP `80` 和 `443` 能从公网访问，并查看 `docker compose logs caddy`。 |
+| 中继不健康或反复重启                  | 确认 `.env` 中有非空的 `UC_RELAY_TOKEN`，再查看 `docker compose logs relay`。                 |
+| 可用性测试提示鉴权失败                | 从 `.env` 复制完全一致的令牌。如果服务器令牌已经更换，每台设备都要更新。                      |
+| 本机能访问 `/healthz`，但域名无法访问 | 检查反向代理目标、HTTPS 证书、防火墙和 DNS 记录。                                             |
+| 已有反向代理拒绝中继连接              | 确认它支持 WebSocket 升级，并保留 `Authorization` 请求头。                                    |
+| UniClipboard 仍在使用默认中继         | 保存自定义中继后选择 **立即重启**，重启前配置不会生效。                                       |
+| 拉取 `latest` 后看不到变化            | 同时执行 `docker compose pull` 和 `docker compose up -d`，再查看 `docker compose ps`。        |
+| 中继延迟很高                          | 选择一处到所有参与设备都有良好直连线路的服务器区域。                                          |
+
+## 更多资料
+
+- [UniClipboard 中继源码与部署说明](https://github.com/UniClipboard/relay)
+- [UniClipboard 中继镜像](https://github.com/UniClipboard/relay/pkgs/container/relay)
+- [iroh 中继概念](https://docs.iroh.computer/concepts/relays)

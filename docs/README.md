@@ -1,0 +1,156 @@
+# UniClipboard Documentation
+
+UniClipboard Desktop is a privacy-first, cross-device clipboard synchronization tool built with Tauri 2, React, and a modular Rust workspace.
+
+This documentation set is a mix of:
+
+- **Current-state guides** that should match the codebase today
+- **Architecture intent** documents that describe target boundaries and design rules
+
+When documentation conflicts with code, treat the code as the source of truth and update the docs.
+
+## Quick Navigation
+
+**For New Developers:**
+
+- [Project Overview](overview.md) - What is UniClipboard and how it works
+- [Architecture Principles](architecture/principles.md) - Understanding Hexagonal Architecture
+- [Module Boundaries](architecture/module-boundaries.md) - What each crate/layer may depend on
+
+**For Implementation:**
+
+- [Bootstrap System](architecture/bootstrap.md) - How dependency injection works
+- [跨平台核心接口](architecture/uc-engine-interface.md) - 宿主操作、生命周期、事件与能力边界
+- [Local Encrypted Search Design](architecture/local-encrypted-search.md) - V1 local search architecture for encrypted history
+- [Snapshot Cache Pipeline ADR](architecture/snapshot-cache/adr-001-snapshot-cache-pipeline.md) - Cache/spool/worker design decisions
+- [Error Handling](guides/error-handling.md) - Error handling strategy
+- [明文探针验收](development/plaintext-probe.md) - 检查数据库、缓存、索引、临时目录和日志是否残留业务原文
+- [GitHub Releases Updater](guides/github-releases-updater.md) - Auto-update pipeline with latest.json
+
+**For Operators / Deployment:**
+
+- [Headless VPS Server Node](../deploy/vps/README.md) - Docker + Caddy stack and provisioning runbook for a self-hosted always-online member ([ADR-007](architecture/adr-007-headless-server-node-deployment.md))
+
+**For Code Review:**
+
+- [Coding Standards](guides/coding-standards.md) - Code style and conventions
+- [Module Boundaries](architecture/module-boundaries.md) - Architecture compliance checklist
+
+**For Reference:**
+
+- [DeepWiki Documentation](https://deepwiki.com/UniClipboard/UniClipboard) - Interactive diagrams and flows
+- [Connection Stability Recovery PRD](p2p/2026-04-11-connection-stability-recovery-prd.md) - Focused product requirements for self-healing after temporary mDNS loss
+- [主动刷新共享设备 PRD](product/2026-08-07-shared-device-refresh-prd.md) - 新设备主动发现并自动连接同一 Space 中的共享设备
+- [Paired Sync Reliability Draft](p2p/2026-04-11-paired-sync-reliability-draft.md) - Product behavior draft for durable paired-device clipboard delivery
+- [Paired Sync Reliability Worklist](p2p/2026-04-11-paired-sync-reliability-worklist.md) - Build-ready checklist for the first reliability fix
+
+## Architecture at a Glance
+
+```
+┌───────────────────────────────────────┐   ┌──────────────────┐
+│       GUI (uc-tauri + React)          │   │  CLI (uc-cli)    │
+│  Quick Panel / Tray / Settings        │   │  uniclip 命令行  │
+└──────────────────┬────────────────────┘   └────────┬─────────┘
+                   │  HTTP + WebSocket (127.0.0.1)    │
+                   └──────────────────┬───────────────┘
+                                      ▼
+┌──────────────────────────────────────────────────────────────┐
+│                     Daemon (uniclipd)                         │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │ uc-webserver (axum API)                                │  │
+│  └────────────────────────┬───────────────────────────────┘  │
+│  ┌────────────────────────▼───────────────────────────────┐  │
+│  │ uc-bootstrap（唯一组合根）                              │  │
+│  │   ↓ wires                                              │  │
+│  │ uc-application (use cases / facades)                   │  │
+│  │   ↓ depends on                                         │  │
+│  │ uc-core (domain models + port traits)                  │  │
+│  │   ↑ implemented by                                     │  │
+│  │ uc-infra (SQLite/iroh/crypto) + uc-platform (OS)       │  │
+│  └────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**核心原则**：GUI 和 CLI 是 daemon 的纯客户端，不内嵌业务栈。所有业务逻辑在 daemon 内通过 `uc-bootstrap` 装配运行。
+
+## Current State
+
+The codebase is already organized around a modular Rust workspace and hexagonal boundaries, but the migration is still ongoing in practice.
+
+- Core domain, application use cases, infrastructure adapters, and platform adapters all exist as first-class crates
+- The Tauri entrypoint still carries important integration logic for bootstrap, daemon supervision, resource resolution, and window management
+- Historical migration notes may still refer to removed legacy paths or earlier architecture phases
+- Avoid relying on old completion percentages; prefer current code and current docs
+
+## Getting Started
+
+1. **Read** [Project Overview](overview.md) to understand the system
+2. **Study** [Architecture Principles](architecture/principles.md) to grasp the design
+3. **Review** [Module Boundaries](architecture/module-boundaries.md) before making changes
+4. **Follow** [Coding Standards](guides/coding-standards.md) when implementing
+
+## Development Workflow
+
+```bash
+# Install dependencies (uses Bun)
+bun install
+
+# Start frontend-only dev server
+bun run dev
+
+# Start full Tauri app in development
+bun run tauri:dev
+
+# Run frontend tests
+bun run test
+
+# Run Rust workspace tests
+(cd src-tauri && cargo test --workspace)
+
+# Build for production
+bun run tauri build
+```
+
+## Documentation Guide
+
+### How to Use These Documents
+
+**When implementing a feature:**
+
+1. Check [Module Boundaries](architecture/module-boundaries.md) to understand which crates are involved
+2. Review [Bootstrap System](architecture/bootstrap.md) to see how to inject dependencies
+3. Follow [Error Handling](guides/error-handling.md) for proper error propagation
+
+**When reviewing code:**
+
+1. Verify architecture compliance using [Module Boundaries](architecture/module-boundaries.md) checklists
+2. Check [Coding Standards](guides/coding-standards.md) for style and conventions
+3. Ensure error handling follows [Error Handling](guides/error-handling.md) strategy
+
+**When making architectural decisions:**
+
+1. Reference [Architecture Principles](architecture/principles.md) for core principles
+2. Review [Bootstrap System](architecture/bootstrap.md) for dependency injection patterns
+3. Prefer current architecture docs and code over historical planning material
+
+### Document Conventions
+
+- **✅ Allowed**: What you SHOULD do
+- **❌ Prohibited**: What you MUST NOT do
+- **⚠️ Warning**: Common pitfalls to avoid
+- **Iron Rule**: Critical architectural constraint that cannot be violated
+
+## Contributing to Documentation
+
+When updating documentation:
+
+1. Keep it focused on **principles**, not implementation details
+2. Use **examples** from actual code when possible
+3. Update **cross-references** if moving or renaming sections
+4. **Avoid duplication** - link to existing sections instead of repeating
+
+## Additional Resources
+
+- **Project DeepWiki**: https://deepwiki.com/UniClipboard/UniClipboard (interactive diagrams)
+- **GitHub Repository**: https://github.com/UniClipboard/UniClipboard
+- **CLAUDE.md**: Project-specific instructions for Claude Code (in repository root)

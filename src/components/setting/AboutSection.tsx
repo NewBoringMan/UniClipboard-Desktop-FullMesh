@@ -1,0 +1,494 @@
+import { getVersion } from '@tauri-apps/api/app'
+import { invoke } from '@tauri-apps/api/core'
+import { Loader2, TriangleAlert } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import {
+  captureUpdateActionInvoked,
+  captureUpdateDialogOpened,
+  captureUpdateDismissed,
+  type DismissSource,
+  toUiPhase,
+} from '@/api/update-telemetry'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Progress } from '@/components/ui/progress'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { toast } from '@/components/ui/toast'
+import { PackageManagerUpdateDialog } from '@/components/update/PackageManagerUpdateDialog'
+import { ReleaseNotes } from '@/components/update/ReleaseNotes'
+import { useSetting } from '@/hooks/useSetting'
+import { useShortcutLayer } from '@/hooks/useShortcutLayer'
+import { useUpdate } from '@/hooks/useUpdate'
+import { createLogger } from '@/lib/logger'
+import { cn } from '@/lib/utils'
+import type { UpdateChannel } from '@/types/setting'
+import { SponsorsGroup } from './about/SponsorsGroup'
+import { SettingGroup } from './SettingGroup'
+import { SettingRow } from './SettingRow'
+import { useOptimisticSetting } from './useOptimisticSetting'
+
+const log = createLogger('about-section')
+
+function parseChannel(version: string): string {
+  const match = version.match(/-(alpha|beta|rc)/)
+  return match ? match[1] : 'stable'
+}
+
+function getChannelBadgeVariant(channel: string): 'outline' | 'secondary' {
+  return channel === 'stable' ? 'secondary' : 'outline'
+}
+
+function getChannelLabel(channel: string): string {
+  const labels: Record<string, string> = {
+    alpha: 'Alpha',
+    beta: 'Beta',
+    rc: 'RC',
+    stable: 'Stable',
+  }
+  return labels[channel] ?? channel
+}
+
+function normalizeUpdateChannel(value: string): UpdateChannel | null {
+  return value === 'auto' ? null : (value as UpdateChannel)
+}
+
+const AboutSection: React.FC = () => {
+  const { t } = useTranslation()
+  const { setting, loading: settingLoading, updateGeneralSetting } = useSetting()
+  const {
+    updateInfo,
+    isCheckingUpdate,
+    checkForUpdates,
+    installUpdate,
+    downloadProgress,
+    installKind,
+    isManualUpdate,
+  } = useUpdate()
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [autoCheckUpdate, setAutoCheckUpdate] = useOptimisticSetting(
+    setting?.general.autoCheckUpdate ?? true,
+    next => updateGeneralSetting({ autoCheckUpdate: next }),
+    { failureLog: 'Failed to change auto-check-update setting' }
+  )
+  const [autoDownloadUpdate, setAutoDownloadUpdate] = useOptimisticSetting(
+    setting?.general.autoDownloadUpdate ?? false,
+    next => updateGeneralSetting({ autoDownloadUpdate: next }),
+    { failureLog: 'Failed to change auto-download-update setting' }
+  )
+  // The channel persists like the others, then kicks off a background update
+  // check for the newly-selected channel (best-effort — a failed check does not
+  // revert the channel).
+  const [updateChannel, setUpdateChannel] = useOptimisticSetting<UpdateChannel | null>(
+    setting?.general.updateChannel ?? null,
+    async next => {
+      await updateGeneralSetting({ updateChannel: next })
+      checkForUpdates(next).catch(err => log.error({ err }, 'Failed to check for updates'))
+    },
+    { failureLog: 'Failed to change update channel' }
+  )
+  const pendingUpdateChannelRef = useRef<UpdateChannel | null>(null)
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
+  const [packageManagerDialogOpen, setPackageManagerDialogOpen] = useState(false)
+  const [alphaWarningOpen, setAlphaWarningOpen] = useState(false)
+  /** See `Sidebar.tsx` for the dismissal-reason ref pattern. */
+  const dialogDismissReasonRef = useRef<DismissSource | null>(null)
+  const isInstallingUpdate =
+    downloadProgress.phase === 'downloading' || downloadProgress.phase === 'installing'
+  useShortcutLayer({
+    layer: 'modal',
+    scope: 'modal',
+    enabled: updateDialogOpen,
+  })
+
+  const channel = appVersion ? parseChannel(appVersion) : null
+
+  useEffect(() => {
+    let cancelled = false
+    getVersion()
+      .then(version => {
+        if (!cancelled) setAppVersion(version)
+      })
+      .catch(err => {
+        if (!cancelled) log.error({ err }, 'Failed to get app version')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const handleUpdateChannelChange = (value: string) => {
+    const newChannel = normalizeUpdateChannel(value)
+    if (newChannel === updateChannel) return
+
+    if (newChannel === 'alpha' && updateChannel !== 'alpha') {
+      pendingUpdateChannelRef.current = newChannel
+      setAlphaWarningOpen(true)
+      return
+    }
+
+    setUpdateChannel(newChannel)
+  }
+
+  const handleAlphaWarningOpenChange = (open: boolean) => {
+    setAlphaWarningOpen(open)
+    if (!open) {
+      pendingUpdateChannelRef.current = null
+    }
+  }
+
+  const handleConfirmAlphaChannel = () => {
+    const channel = pendingUpdateChannelRef.current
+    setAlphaWarningOpen(false)
+    pendingUpdateChannelRef.current = null
+
+    if (channel !== 'alpha') return
+    setUpdateChannel(channel)
+  }
+
+  const handleOpenUpdaterWindowDev = async () => {
+    try {
+      await invoke('dev_open_updater_window', { trace: null })
+    } catch (error) {
+      log.error({ err: error }, 'Dev open updater window failed')
+      toast.error(String(error))
+    }
+  }
+
+  const handleCheckUpdate = async () => {
+    try {
+      const update = await checkForUpdates()
+      if (!update) {
+        toast.success(t('update.noUpdate'))
+        return
+      }
+      // After a successful check the backend state is at least `available`,
+      // so `toUiPhase` returns a non-null value. Fall back to `available`
+      // defensively if state hasn't propagated yet.
+      const uiPhase = toUiPhase(downloadProgress.phase) ?? 'available'
+      captureUpdateDialogOpened('sidebar_icon', uiPhase)
+      // deb/rpm: Tauri's in-app updater can't install system packages; route
+      // the user to apt/dnf with a copy-able command instead. windowsportable:
+      // the NSIS updater would install into Program Files, not the portable
+      // folder, so route it to the same "download out-of-band" dialog.
+      if (isManualUpdate) {
+        setPackageManagerDialogOpen(true)
+      } else {
+        setUpdateDialogOpen(true)
+      }
+    } catch (error) {
+      log.error({ err: error }, '检查更新失败')
+      toast.error(t('update.checkFailed'))
+    }
+  }
+
+  const handleInstallUpdate = async () => {
+    if (!updateInfo || isInstallingUpdate) return
+    captureUpdateActionInvoked('install', 'started')
+    try {
+      await installUpdate()
+      setUpdateDialogOpen(false)
+    } catch (error) {
+      captureUpdateActionInvoked('install', 'failed')
+      log.error({ err: error }, '更新失败')
+      toast.error(t('update.installFailed'))
+    }
+  }
+
+  const handleUpdateDialogOpenChange = (open: boolean) => {
+    if (!open && updateDialogOpen) {
+      const uiPhase = toUiPhase(downloadProgress.phase)
+      if (uiPhase) {
+        const source: DismissSource = dialogDismissReasonRef.current ?? 'dialog_closed'
+        captureUpdateDismissed(uiPhase, source)
+      }
+      dialogDismissReasonRef.current = null
+    }
+    setUpdateDialogOpen(open)
+  }
+
+  const handlePackageManagerDialogOpenChange = (open: boolean) => {
+    if (!open && packageManagerDialogOpen) {
+      const uiPhase = toUiPhase(downloadProgress.phase) ?? 'available'
+      captureUpdateDismissed(uiPhase, 'package_manager_dialog_closed')
+    }
+    setPackageManagerDialogOpen(open)
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* App identity hero */}
+      <div className="flex flex-col items-center gap-4 rounded-xl border border-border/60 bg-card px-6 py-8 text-center">
+        <div className="flex size-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-primary/60 shadow-lg shadow-primary/25">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="size-9 text-primary-foreground"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <title>{t('settings.sections.about.appName')}</title>
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
+          </svg>
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-center gap-2">
+            <h3 className="text-xl font-semibold tracking-tight">
+              {t('settings.sections.about.appName')}
+            </h3>
+            {channel && (
+              <Badge variant={getChannelBadgeVariant(channel)}>{getChannelLabel(channel)}</Badge>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {appVersion
+              ? t('settings.sections.about.version', { version: appVersion })
+              : t('settings.sections.about.version', { version: '...' })}
+          </p>
+        </div>
+        <Button
+          size="lg"
+          className="w-44 transition-colors"
+          onClick={handleCheckUpdate}
+          disabled={settingLoading || isCheckingUpdate}
+          aria-busy={isCheckingUpdate}
+        >
+          <span className="inline-flex min-w-0 items-center justify-center gap-1.5">
+            {isCheckingUpdate && <Loader2 data-icon="inline-start" className="animate-spin" />}
+            <span>
+              {isCheckingUpdate
+                ? t('settings.sections.about.checkingUpdate')
+                : t('settings.sections.about.checkUpdate')}
+            </span>
+          </span>
+        </Button>
+        {import.meta.env.DEV && (
+          <button
+            type="button"
+            className="text-xs text-amber-600 underline-offset-2 hover:underline dark:text-amber-400"
+            onClick={handleOpenUpdaterWindowDev}
+            title="Dev only: open the Sparkle-style updater window with mock data"
+          >
+            Open updater window (dev)
+          </button>
+        )}
+      </div>
+
+      {/* Update settings */}
+      <SettingGroup title={t('settings.sections.about.updatesTitle')}>
+        <SettingRow
+          label={t('settings.sections.about.autoCheckUpdate.label')}
+          description={t('settings.sections.about.autoCheckUpdate.description')}
+        >
+          <Switch checked={autoCheckUpdate} onCheckedChange={setAutoCheckUpdate} />
+        </SettingRow>
+
+        <SettingRow
+          label={t('settings.sections.about.autoDownloadUpdate.label')}
+          description={
+            autoCheckUpdate
+              ? t('settings.sections.about.autoDownloadUpdate.description')
+              : t('settings.sections.about.autoDownloadUpdate.disabledHint')
+          }
+        >
+          <Switch
+            checked={autoDownloadUpdate && autoCheckUpdate}
+            onCheckedChange={setAutoDownloadUpdate}
+            disabled={!autoCheckUpdate}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t('settings.sections.about.updateChannel.label')}
+          description={t('settings.sections.about.updateChannel.description')}
+        >
+          <Select value={updateChannel ?? 'auto'} onValueChange={handleUpdateChannelChange}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">
+                {t('settings.sections.about.updateChannel.auto')}
+              </SelectItem>
+              <SelectItem value="stable">
+                {t('settings.sections.about.updateChannel.stable')}
+              </SelectItem>
+              <SelectItem value="alpha">
+                {t('settings.sections.about.updateChannel.alpha')}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+      </SettingGroup>
+
+      {/* Sponsors */}
+      <SponsorsGroup />
+
+      {/* Footer: links + copyright */}
+      <div className="space-y-2.5 pt-1 text-center">
+        <div className="flex justify-center gap-x-5 text-sm">
+          <a
+            href="https://github.com/UniClipboard/UniClipboard"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t('settings.sections.about.links.privacyPolicy')}
+          </a>
+          <a
+            href="https://github.com/UniClipboard/UniClipboard"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t('settings.sections.about.links.termsOfService')}
+          </a>
+          <a
+            href="https://github.com/UniClipboard/UniClipboard/blob/main/ABOUT.md"
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {t('settings.sections.about.links.aboutMaintainers')}
+          </a>
+        </div>
+        <p className="text-xs text-muted-foreground/80">{t('settings.sections.about.copyright')}</p>
+      </div>
+
+      <AlertDialog open={updateDialogOpen} onOpenChange={handleUpdateDialogOpenChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('update.title')}</AlertDialogTitle>
+            <AlertDialogDescription render={<div />} className="space-y-3">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>{t('update.currentVersion')}</span>
+                  <span className="text-foreground">{updateInfo?.currentVersion ?? '-'}</span>
+                </div>
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span>{t('update.latestVersion')}</span>
+                  <span className="text-foreground">{updateInfo?.version ?? '-'}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-foreground">
+                  {t('update.releaseNotes')}
+                </div>
+                <div className="scrollbar-thin max-h-48 overflow-auto rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                  <ReleaseNotes content={updateInfo?.body ?? ''} fallback={t('update.noNotes')} />
+                </div>
+              </div>
+              {(downloadProgress.phase === 'downloading' ||
+                downloadProgress.phase === 'installing') && (
+                <div className="space-y-2 pt-2">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>
+                      {downloadProgress.phase === 'installing'
+                        ? t('update.installing')
+                        : t('update.downloading')}
+                    </span>
+                    {downloadProgress.total !== null && (
+                      <span>
+                        {Math.round((downloadProgress.downloaded / downloadProgress.total) * 100)}%
+                      </span>
+                    )}
+                  </div>
+                  <Progress
+                    value={
+                      downloadProgress.total !== null
+                        ? (downloadProgress.downloaded / downloadProgress.total) * 100
+                        : undefined
+                    }
+                    className={cn('h-2', downloadProgress.total === null && 'animate-pulse')}
+                  />
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              disabled={isInstallingUpdate}
+              onClick={() => {
+                dialogDismissReasonRef.current = 'dialog_later'
+              }}
+            >
+              {t('update.later')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={event => {
+                event.preventDefault()
+                handleInstallUpdate()
+              }}
+              disabled={isInstallingUpdate}
+            >
+              {t('update.updateNow')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {installKind && (
+        <PackageManagerUpdateDialog
+          open={packageManagerDialogOpen}
+          onOpenChange={handlePackageManagerDialogOpenChange}
+          installKind={installKind}
+          updateInfo={updateInfo}
+        />
+      )}
+
+      <AlertDialog open={alphaWarningOpen} onOpenChange={handleAlphaWarningOpenChange}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-amber-500/10 text-amber-600 dark:text-amber-400">
+              <TriangleAlert className="size-5" />
+            </AlertDialogMedia>
+            <AlertDialogTitle>
+              {t('settings.sections.about.updateChannel.alphaWarning.title')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('settings.sections.about.updateChannel.alphaWarning.description')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t('settings.sections.about.updateChannel.alphaWarning.cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={event => {
+                event.preventDefault()
+                handleConfirmAlphaChannel()
+              }}
+            >
+              {t('settings.sections.about.updateChannel.alphaWarning.confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  )
+}
+
+export default AboutSection

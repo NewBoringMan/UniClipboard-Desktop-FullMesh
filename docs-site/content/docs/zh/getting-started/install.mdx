@@ -1,0 +1,368 @@
+---
+title: 安装
+description: 在 macOS、Windows 或 Linux 上安装 UniClipboard。
+---
+
+import { Step, Steps } from 'fumadocs-ui/components/steps'
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs'
+
+UniClipboard 为 Windows、macOS、Linux 提供桌面应用与 `uniclip` 命令行工具。按你的平台选择安装方式 ——
+所有安装包最终指向同一组
+[GitHub Releases](https://github.com/UniClipboard/UniClipboard/releases)
+构建产物。带 `-alpha.N` 后缀的 tag 是预发布版本，会在 Releases 页面被
+标记为「Pre-release」；不带后缀的 tag 即正式发布。
+
+<Callout type="info">macOS 桌面应用需要 macOS 12.5 或更高版本。</Callout>
+
+## 一键安装（Linux / macOS）
+
+赶时间？一行命令自动识别系统与架构、挑对安装包：
+
+```bash
+curl -fsSL https://uniclipboard.app/install.sh | bash
+```
+
+脚本会自动判断：
+
+- **macOS** —— 下载 `.app.tar.gz`，解压后搬到 `/Applications/UniClipboard.app`（写权限不足时自动调用 `sudo`；也可用 `--prefix "$HOME/Applications"` 走用户级安装）。
+- **Linux** —— 一键安装脚本只会在 Ubuntu 20.04 上自动改走 `snap`（`core22` runtime 自带 GTK + WebKit，因此可以避开 `.deb` 对 `libwebkit2gtk-4.1` 的依赖问题；缺 `snapd` 会通过 `apt` 自动补装）。其它 Debian 系发行版默认仍通过 `apt` 安装 `.deb`；下方的 Snap 小节属于手动安装的备选路径。`dnf` 系发行版（Fedora/RHEL/openSUSE）会启用 [`mkdir700/uniclipboard`](https://copr.fedorainfracloud.org/coprs/mkdir700/uniclipboard/) COPR 仓库并 `dnf install uniclipboard`，后续 `dnf upgrade` 自动跟版本——若传 `--version vX.Y.Z` 则改走一次性 `.rpm` 下载。无 root 时回退到 AppImage（装到 `~/.local/bin` 并注册 `.desktop`）。
+
+常用选项：
+
+```bash
+# 锁定版本
+curl -fsSL https://uniclipboard.app/install.sh | bash -s -- --version v0.9.0
+
+# 强制使用 AppImage（即使有 sudo，也免 root 装到用户目录）
+curl -fsSL https://uniclipboard.app/install.sh | bash -s -- --format appimage
+```
+
+卸载请使用对应脚本 —— 加 `--purge` 会同时清除数据目录、配置与缓存；加 `--dry-run` 仅预览将要删除的内容：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/UniClipboard/UniClipboard/main/scripts/uninstall.sh | bash
+```
+
+<Callout type="info">
+  更新策略与下方各平台一致：`.deb` / `.rpm` 不会从 App
+  内更新器升级，请重跑安装脚本或走系统包管理器。 App 检测到这两种安装方式后，点 **检查更新**
+  会弹出对应的 `apt` / `dnf` 命令（含复制按钮），而不是尝试应用内安装。 AppImage（Linux）与
+  `.app`（macOS）仍由 App 内更新器接管。Windows 安装请参见下方 **Windows** 标签页。
+</Callout>
+
+## 选择平台
+
+<Tabs items={['macOS', 'Windows', 'Linux']}>
+
+<Tab value="macOS">
+
+macOS 推荐使用官方 Homebrew tap。
+
+```bash
+brew tap UniClipboard/tap
+
+# Homebrew 6.0+ 默认要求先信任第三方 tap 才会加载其 formula/cask，
+# 否则会报 “Refusing to load ... from untrusted tap”。该步骤只需执行一次。
+brew trust UniClipboard/tap
+
+# 桌面应用（.app）
+brew install --cask uniclipboard
+
+# 仅安装 CLI，命令名为 `uniclip`
+brew install uniclipboard
+```
+
+也可以省去 `brew tap`，一行直装（仍需先信任一次该 tap）：
+
+```bash
+brew trust UniClipboard/tap                          # Homebrew 6.0+，一次性
+brew install --cask UniClipboard/tap/uniclipboard    # GUI
+brew install UniClipboard/tap/uniclipboard           # CLI
+```
+
+cask 与 formula 互不冲突，需要的话两个都装即可（GUI + 终端 `uniclip`）。
+
+更习惯手动安装？前往
+[Releases](https://github.com/UniClipboard/UniClipboard/releases)
+页面下载最新 `.dmg`，把应用拖入 `/Applications`。
+
+### 首次启动权限
+
+UniClipboard 注册全局快捷面板快捷键时，macOS 可能请求 **输入监控（Input Monitoring）** 权限。请在 **系统设置 → 隐私与安全性 → 输入监控** 中授权，然后完全退出并重新启动应用。
+
+**辅助功能（Accessibility）** 是另一项独立的可选权限，只在启用快捷面板的双击修饰键触发方式时需要。UniClipboard 不会在后台主动请求；对应设置会显示一个按钮，由你明确打开 **隐私与安全性 → 辅助功能** 并授权，然后返回应用。剪贴板同步本身不依赖辅助功能权限。
+
+</Tab>
+
+<Tab value="Windows">
+
+Windows 提供两种形式：**安装版**（NSIS 安装包，推荐大多数人）和 **便携版**（绿色版，免安装）。两种都覆盖 `x64`（Intel/AMD）与 `arm64`（Windows on ARM）。
+
+### 安装版（NSIS）
+
+下载 `UniClipboard_<version>_<arch>-setup.exe`（`<arch>` 为 `x64` 或 `arm64`），一路下一步即可。安装器会写入开始菜单，并在 **设置 → 应用** 下注册卸载项。
+
+安装包已数字签名。
+
+<Callout type="info">
+  首次运行新版本时 SmartScreen 可能弹出警告。如果发布者信息与签名身份一致，点击 **更多信息 →
+  仍要运行**。如果不放心，可以在 **属性 → 数字签名** 中校验签名。
+</Callout>
+
+### 便携版（绿色版）
+
+不想安装、想随身带着跑（比如放 U 盘），就用便携版。下载 `UniClipboard_<version>_<arch>-portable.zip`，解压后双击里面的 `UniClipboard.exe` 即可运行——免安装、不写注册表、不在系统目录留痕。
+
+- **数据就放在程序旁边。** 所有数据（加密数据库、密钥、搜索索引、日志）都保存在 `UniClipboard.exe` 同目录下自动创建的 `data` 文件夹里。把整个文件夹（exe + `portable.dat` + `data`）一起拷走，配置就跟着走；删掉 `data` 即可重置。
+- **`portable.dat` 是开关。** 压缩包里这个标记文件用来开启便携模式。删掉它，应用就会和安装版一样把数据写到 `%LOCALAPPDATA%\app.uniclipboard.desktop\`。
+- **选对架构。** `arm64` 版用于 Surface Pro X 等 Windows on ARM 设备，`x64` 版用于常见的 Intel/AMD 电脑。
+
+<Callout type="info">
+  便携版**不会**应用内自更新（自更新走的 NSIS 安装器会装到 Program Files，与便携理念冲突）。升级时点
+  **检查更新** 会提示你去发布页下载新的 `*-portable.zip`，替换 `UniClipboard.exe` 即可，`data`
+  文件夹保留不动。便携版同样需要系统已安装 Microsoft Edge WebView2 Runtime（新版 Windows 已预装）。
+</Callout>
+
+<Callout type="warn">
+  **已知限制：** 目前 WebView2 运行时的浏览器缓存仍写在
+  `%LOCALAPPDATA%`，尚未跟随便携文件夹，因此便携运行**并非 100%
+  零痕迹**。不过这只是浏览器缓存，你真正的数据（数据库、密钥、搜索索引、日志）都在程序旁边的 `data\`
+  目录里。
+</Callout>
+
+按需从
+[Releases](https://github.com/UniClipboard/UniClipboard/releases)
+页面下载安装包或便携包。
+
+</Tab>
+
+<Tab value="Linux">
+
+每次发布都会构建 `.deb`、`.rpm` 与 `.AppImage` 三种格式，覆盖 `x86_64` 与 `aarch64`。按你的发行版挑最合适的渠道：
+
+### Fedora / RHEL / openSUSE — 推荐 COPR
+
+通过 [Fedora COPR](https://copr.fedorainfracloud.org/coprs/mkdir700/) 一键安装并自动跟随版本升级：
+
+```bash
+# Alpha 渠道（含预发布版本，更新更频繁）
+sudo dnf copr enable mkdir700/uniclipboard-alpha
+sudo dnf install uniclipboard
+
+# 正式渠道（仅稳定版）
+sudo dnf copr enable mkdir700/uniclipboard
+sudo dnf install uniclipboard
+```
+
+启用后 `sudo dnf upgrade` 会自动拉取新版本。详见 [COPR 部署手册](https://github.com/UniClipboard/UniClipboard/blob/main/docs/packaging/COPR.md)。
+
+### Ubuntu / Debian / 老发行版 — 推荐 Snap
+
+Snap 包基于 `core22` 严格沙箱构建，自带 GTK + WebKit 运行时，因此在 Ubuntu 20.04+、Debian 11+、RHEL 9、openSUSE Leap 等老发行版上都能正常运行。
+
+```bash
+# 正式渠道（稳定版，amd64 + arm64 双架构）
+sudo snap install uniclipboard
+
+# Edge 渠道（含预发布版本，更新更频繁）
+sudo snap install uniclipboard --edge
+```
+
+安装后再授权 snap 访问系统钥匙串（GNOME Keyring / KWallet），让守护进程把长期身份密钥放进系统密钥环：
+
+```bash
+sudo snap connect uniclipboard:password-manager-service
+```
+
+不接这一步也能跑——守护进程会降级到文件 KEK，存放在 snap 数据目录下（日志里能看到 `System secure storage probe failed; falling back to file-based KEK`）。接上 plug 只是把 KEK 搬进 OS 管理的钥匙串，跟其他系统应用走同一套机制。
+
+`password-manager-service` 当前不是 auto-connect interface；等 snap store 的 auto-connect 申请通过后，新安装就不再需要手动执行这条命令。
+
+没有 `snapd`？请参考 [Snapcraft 安装指南](https://snapcraft.io/docs/installing-snapd) 查看你所用发行版的安装方式。
+
+### 任意发行版 — AppImage
+
+每个 release 也会发布 AppImage。从 [Releases](https://github.com/UniClipboard/UniClipboard/releases) 页面下载，赋予可执行权限即可运行：
+
+```bash
+chmod +x UniClipboard_<version>_amd64.AppImage
+./UniClipboard_<version>_amd64.AppImage
+```
+
+AppImage 是 Linux 上 App 内更新器唯一支持的自更新格式 —— 走 COPR / Snap / dpkg 安装的版本不会通过应用内更新器升级，请用对应包管理器。
+
+### 一次性手动安装单个 .deb / .rpm
+
+不想加仓库？也可以从 Releases 直接下单文件安装：
+
+```bash
+# Debian / Ubuntu
+sudo dpkg -i uniclipboard_<version>_amd64.deb
+sudo apt-get install -f                                 # 如有缺失依赖，由 apt 补齐
+
+# Fedora / RHEL / openSUSE（一次性，不加 COPR 仓库）
+sudo dnf install ./UniClipboard-<version>-1.x86_64.rpm
+```
+
+### 无桌面环境（仅安装 CLI）
+
+服务器、SSH 会话或任何没有桌面的环境，可以从 Releases 单独下载 `uniclip` CLI —— 查找 `uniclip-<version>-<arch>` 产物（与 musl 静态链接）。CLI 内置守护进程，无需 GUI 即可运行。
+
+</Tab>
+
+</Tabs>
+
+## 从源码构建
+
+需要 [Bun](https://bun.sh) 与 Rust 工具链（`rustup default stable`）。
+
+<Steps>
+
+<Step>
+
+### 克隆仓库
+
+```bash
+git clone https://github.com/UniClipboard/UniClipboard.git
+cd UniClipboard
+```
+
+</Step>
+
+<Step>
+
+### 安装依赖
+
+```bash
+bun install
+```
+
+</Step>
+
+<Step>
+
+### 开发模式启动，或构建发行包
+
+```bash
+# 本地开发，桌面应用支持热重载
+bun tauri dev
+
+# 为当前平台构建发行包
+bun tauri build
+```
+
+</Step>
+
+</Steps>
+
+发行包位于 `target/release/bundle/`。分支策略、commit 规范与 PR 流程见
+[CONTRIBUTING_ZH.md](https://github.com/UniClipboard/UniClipboard/blob/main/CONTRIBUTING_ZH.md)。
+
+## Android App
+
+**UniClipboard Android 客户端** 的仓库地址是
+[github.com/UniClipboard/UniClip](https://github.com/UniClipboard/UniClip)
+—— 一个客户端同时覆盖 iOS 与 Android。因为桌面监听器讲的是
+SyncClipboard 协议，其他任意 SyncClipboard 客户端也能接到同一个监听器。
+
+直接到 [releases](https://github.com/UniClipboard/UniClip/releases/latest)
+下载最新 APK —— 按手机的 CPU 架构选（大多数现代设备选 `arm64-v8a`，
+不确定就装 `universal`），然后侧载安装。目前不发布到 Google Play。
+
+配对流程（URL + Basic Auth 凭据）与 iOS 一致，详见
+[移动端同步指南 → Android](../core-features/mobile-sync#android--其他客户端)。
+
+<Callout type="info">
+  **当前 Android 的限制。** Android 客户端走 **HTTP 伴侣** 模式：明文 HTTP + Basic Auth，没有 iroh
+  P2P、没有 relay（TLS 由反向代理提供）；它 **不是空间对端**，不会加入信任网格，
+  只交换当下的剪贴板内容，不复制加密历史。默认在 LAN 下与桌面互通，需要跨网络时可经 [无头 server
+  节点](../guides/self-host-server-node) 或 Tailscale。Android 10+ 的后台剪贴板限制 也可能导致 App
+  不在前台时收发延迟或被系统拦截。
+</Callout>
+
+## iOS App（beta 公测）
+
+iPhone 端 **UniClipboard iOS App** 目前通过 **TestFlight** 进行 beta
+公测，邀请链接：
+
+[https://testflight.apple.com/join/nyNQ8dQe](https://testflight.apple.com/join/nyNQ8dQe)
+
+<Steps>
+
+<Step>
+
+### 在 App Store 安装 TestFlight
+
+打开 iPhone 上的 **App Store**，搜索 **TestFlight** 并安装。
+TestFlight 是 Apple 官方的 beta 测试分发工具，是安装 UniClipboard
+iOS App beta 的前置依赖。
+
+</Step>
+
+<Step>
+
+### 打开邀请链接
+
+在 iPhone 上点开上面的 TestFlight 邀请链接。链接会自动跳转到
+TestFlight App，点击 **「接受」→「安装」**，UniClipboard 就会装到
+主屏幕。
+
+</Step>
+
+<Step>
+
+### 在桌面端生成连接凭据
+
+App 默认走与桌面端的局域网同步（也可经 server 节点或 Tailscale 跨网络）。
+连接流程详见 [移动端同步指南](../core-features/mobile-sync)。
+
+</Step>
+
+</Steps>
+
+<Callout type="warn">
+  **遇到证书错误或 TestFlight 连不上 App Store Connect？先关代理梯子。** 使用
+  Loon、Surge、Shadowrocket、Clash 等代理工具时，TestFlight 在打开 邀请链接或点 **安装** 时可能出现
+  HTTPS / 证书报错，或一直转圈拉不到 App Store Connect。请 **临时关闭代理（含全局规则、TUN、HTTPS
+  解密 / MitM 等）**，让 TestFlight 走直连；装完应用后再打开梯子即可。App 只跟你局域网
+  内的桌面通信，不依赖代理。
+</Callout>
+
+## 验证下载（可选）
+
+注重安全的用户可以在安装前对下载的发布文件做密码学校验。每个签名版本都会附带
+`SHA256SUMS.txt` 及其 [minisign](https://jedisct1.github.io/minisign/) 签名
+（`SHA256SUMS.txt.minisig`），校验通过即可确认文件未被篡改、来源可信。签名公钥与
+逐步操作说明见[安全策略](https://github.com/UniClipboard/UniClipboard/blob/main/SECURITY.md#verifying-release-downloads)。
+
+## 验证安装
+
+安装完成后，确认 CLI 已在 `PATH` 中：
+
+```bash
+uniclip --version
+```
+
+对于 GUI，首次启动应显示 **这是我的第一台设备** / **我已经在另一台设备上使用** 两个选项；如果已有空间，则直接进入仪表盘。
+
+## 数据存储位置
+
+UniClipboard 把加密数据库、搜索索引与日志放在各平台标准的应用数据目录下，目录名为
+`app.uniclipboard.desktop`：
+
+| 平台    | 路径                                                      |
+| ------- | --------------------------------------------------------- |
+| macOS   | `~/Library/Application Support/app.uniclipboard.desktop/` |
+| Linux   | `~/.local/share/app.uniclipboard.desktop/`                |
+| Windows | `%LOCALAPPDATA%\app.uniclipboard.desktop\`                |
+
+日志位于其下的 `logs/` 子目录。设置 `UC_PROFILE` 环境变量（如
+`UC_PROFILE=dev`）可在目录名后追加后缀（变成
+`app.uniclipboard.desktop-dev`），这样开发版与正式版可以并存。
+
+Windows **便携版**例外：它把上述数据全部改放到 `UniClipboard.exe` 同目录下的
+`data\` 文件夹里，不写 `%LOCALAPPDATA%`。详见上面 Windows 标签页的「便携版」小节。
+
+## 下一步
+
+继续阅读[快速开始](./quick-start)，创建你的第一个空间并完成首次同步。

@@ -1,0 +1,52 @@
+[package]
+name = "uc-webserver"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+description = "Local HTTP and WebSocket server for UniClipboard daemon"
+
+[lib]
+name = "uc_webserver"
+path = "src/lib.rs"
+
+[dependencies]
+uc-daemon-contract = { path = "../uc-daemon-contract" }
+uc-daemon-local = { path = "../uc-daemon-local" }
+uc-engine = { workspace = true, features = ["lan-compat"] }
+uc-observability = { path = "../uc-observability" }
+anyhow = "1.0"
+axum = { version = "0.7", features = ["ws", "tokio", "http1", "http2", "multipart"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0"
+tokio = { version = "1", features = ["full", "test-util"] }
+tokio-util = "0.7"
+tracing = "0.1"
+url = "2"
+utoipa = { version = "4", features = ["uuid", "chrono", "url"] }
+utoipa-swagger-ui = { version = "7", features = ["axum", "vendored"] }
+uuid = { version = "1.10.0", features = ["v4"] }
+zeroize = "1"
+
+[dev-dependencies]
+async-trait = "0.1"
+tower = { version = "0.5", features = ["util"] }
+# The /healthz load benchmark only: it drives a real listener over real TCP and
+# needs the *real* Argon2id cost on the control arm — a fake hasher would make
+# the comparison meaningless. `libc` reads process CPU time via getrusage.
+# All three are dev-only; none reaches the shipped binary.
+argon2 = "0.5.3"
+libc = "0.2"
+reqwest = { version = "0.12", default-features = false }
+tokio-tungstenite = "0.24"
+
+[features]
+e2e-rendezvous = ["uc-engine/dev-tools"]
+
+[lints]
+workspace = true

@@ -1,0 +1,230 @@
+---
+title: Settings & preferences
+description: Every section of the Settings panel — what each control does and when to touch it.
+---
+
+The Settings panel groups options into eight sections (plus an
+"About"). They appear below in the same order as the sidebar — for
+each, what the control **does** and when you actually want to change
+it.
+
+Mobile-sync configuration lives in its own dialog on the
+**Devices** page rather than under Settings — it's documented
+[further down](#mobile-sync) and in the
+[Mobile sync](../core-features/mobile-sync) guide.
+
+## General
+
+| Setting                       | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Launch at login               | Start UniClipboard automatically when you sign in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Startup mode                  | **Normal** shows the window as usual. **Silent** skips the window and goes straight to the background/tray. **Lightweight** goes further: on the first launch (whether opened manually or at login), once background sync is ready it exits the app window and tray entirely, keeping only the background service running; clicking the app icon afterwards reopens the window. Silent and Lightweight both show a one-time system notification so it's clear the app is still running. Independent of "Launch at login" — either mode can be combined with auto-start on or off. |
+| Restore last entry on startup | Once the background service is ready at launch, put the most recent history entry back on the system clipboard.                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Device name                   | Shown to other devices in the members list — pick something readable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Language                      | English / Simplified Chinese / Traditional Chinese / Japanese / Russian / Brazilian Portuguese.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Interaction sound feedback    | Play light synthesized cues for state changes, menu selection, and successful actions; on by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Privacy: diagnostics          | Send crashes, errors, anonymous logs, and frontend diagnostics; on by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Privacy: usage analytics      | Send anonymous product events for activation, pairing, and sync reliability; on by default and separately controllable.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Debug mode                    | Increase local diagnostic log detail. Turning it on asks for confirmation, then automatically restarts the app and daemon to apply; after turning it off, restart manually to return fully to normal logging. Off by default.                                                                                                                                                                                                                                                                                                                                                     |
+| Export logs                   | Zip the GUI, daemon, and CLI logs from the last 24 hours into your Downloads folder for issue reports.                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+The device name is purely a display alias; it doesn't enter the
+encryption identity. Renaming doesn't affect the node ID or pairing
+state.
+
+Diagnostics and usage analytics are separate toggles. They do not include clipboard content, file content, passphrases, or keys; the full field list is documented in [Privacy & data collection](../core-features/privacy).
+
+## Appearance
+
+| Setting                 | What it does                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Theme mode              | Light / Dark / Follow system. Live update.                                                                                                                                      |
+| Theme color             | Accent color from a palette (slate, rose, orange, amber, ..., blue, violet).                                                                                                    |
+| Use system window frame | Windows and Linux only; off by default. When enabled, the system provides the title bar and window buttons, and search moves back into the page. The setting applies immediately. |
+| UI zoom                 | Presets at 80 / 90 / 100 / 110 / 120 %, plus a free slider; `Reset` returns to 100 %.                                                                                           |
+
+Zoom changes rendering density only (think DPI). It doesn't touch your
+data and doesn't sync to other devices.
+
+## Shortcuts
+
+Bindable commands are organized by **scope**. Each entry can be
+overridden, reset, or cleared individually.
+
+- **Global** — fires across processes, including the
+  [Quick Panel](../core-features/quick-panel) hotkey.
+- **Clipboard** — navigation in the main dashboard's history view.
+- **Settings** — navigation inside this panel.
+- **Devices** — navigation in the Devices page.
+- **Modal** — generic dialog/sheet actions.
+
+The recorder accepts a key combo directly; conflicts are flagged as
+you type. `Reset` returns to the default; `Clear` leaves the binding
+empty.
+
+## Quick Panel
+
+| Setting             | What it does                                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable quick panel  | Master switch. On → register the global hotkey and pre-create the panel window in the background. Off → unregister the hotkey now.                                                                                                                                        |
+| Position            | Where the panel opens when you trigger it — **Screen center** (default) or **Follow cursor** (near the pointer, nudged in from screen edges). Applies to the next open; no restart needed.                                                                                |
+| Double-tap modifier | Open the panel by tapping Option/Alt, Control, or Command/Windows/Super twice by itself. **Off** by default; the recorded hotkey stays active either way. Needs macOS **Accessibility** (a separate grant from Input Monitoring); unavailable in native Wayland sessions. |
+
+On by default — the [Quick Panel](../core-features/quick-panel) is the product's
+keyboard-first entry point. Turn it off if the hotkey clashes with
+another app you can't reconfigure, or if a policy in your environment
+doesn't allow background panel windows.
+
+Re-enabling is fully live: the hotkey is registered and the window is
+pre-created on toggle. **Disabling** is half-live — the hotkey stops
+firing immediately, but the already-created background window (and its
+WebContent process) stays resident until you restart the app. A banner
+above the toggle offers a one-click restart when you want those
+resources back.
+
+The hotkey itself lives under [Shortcuts → Global → Open Quick
+Panel](#shortcuts) and is mirrored inside this section so you can
+configure "enable + bind" in one place; both surfaces edit the same
+binding.
+
+## Sync
+
+How this device participates in sync, plus file-related thresholds:
+
+| Setting                   | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable sync               | Master switch; off → no content is sent or received, including files, restores, and manual sends.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Enable auto-sync          | Off → automatic outbound sync and restore sync stop, while manual sends remain available when sync is enabled.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Sync on restore           | Off by default. When you restore a history entry, your other devices restore the same content too. Requires sync and auto-sync.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Enable file sync          | File payload switch; off → file payloads neither sent nor received. It stays available for manual sends when sync is enabled and auto-sync is off.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| File storage location     | Where received files are saved. Default: managed storage (app cache, subject to the cache/retention limits below), where received files keep their original names after unsafe path characters are removed. Point it at a folder to auto-save inbound files there instead — those are yours to keep and are never removed by cache cleanup or history deletion. An inbound **folder** only lands here if the volume can place it without ever overwriting a same-named folder; on volumes that can't guarantee that (some network drives, exFAT, certain FUSE mounts) folders fall back to managed storage while single files still save here. |
+| Small-file threshold (MB) | Files below it ride the inline fast path; above it use the blob stream.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Max single-file size (MB) | Files larger than this are rejected and surfaced in history with a reason.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Per-peer file cache (MB)  | Per-peer cache cap; LRU eviction once exceeded.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| File retention (hours)    | How long blob chunks may sit in cache before being eligible for cleanup.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Auto-cleanup              | Whether the above limits are enforced periodically.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+Per-content-type and per-peer **gates** live elsewhere — they're in
+each peer's
+[Device settings modal](../core-features/devices#content-type-allowlist).
+
+## Security
+
+| Setting                        | What it does                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| Auto-unlock encryption session | Re-derive the MasterKey from the OS keyring KEK after lock/wake. Off → manual unlock. |
+
+For the underlying key model, see
+[Pairing & sync — Trust](./pairing#trust-the-space--invite-model).
+
+## Network
+
+<Feature since="0.7.0">
+  **LAN-only mode**, **Allow overlay network addrs**, and **Custom relay nodes** are network-side
+  knobs introduced in 0.7. They require a daemon restart to take effect — the **Restart required**
+  banner surfaces inline above whichever fields you changed.
+</Feature>
+
+| Setting                     | What it does                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LAN-only mode               | Force-disables encrypted relay; off-LAN peers become unreachable. Same-LAN first pairing continues to work via mDNS.                                                                                                                                                                           |
+| Allow overlay network addrs | When on, Tailscale CGNAT (`100.64.0.0/10`) and IPv6 ULA (`fd7a:115c:a1e0::/48`) addresses are included in invitations and the locally-advertised candidate set; when off, only physical NICs are. Clash TUN fake-ip (`198.18.0.0/15`) and IPv4 link-local are always filtered with no opt-out. |
+| Custom relay nodes          | One iroh relay URL per line. Empty = default relays; non-empty = use only those relay nodes.                                                                                                                                                                                                   |
+| Congestion controller       | Algorithm for network flow control. **CUBIC** (default) works best on local and well-provisioned networks; **BBR3** may perform better on long-distance or lossy links, at the cost of reduced LAN throughput.                                                                                 |
+
+Any change shows a banner saying the daemon needs to restart. Click
+`Restart now` to apply — only the background service restarts; the app
+window stays open. The system tray icon also reflects the LAN-only state
+at a glance.
+
+To stand up your own relay (TLS, systemd / Docker, access control),
+see [Self-hosting an iroh relay](./self-host-relay).
+
+## Storage
+
+The biggest section, and the one with the most footguns.
+
+| Block              | Content                                                                                                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Storage usage      | Four bars — database, encrypted vault, cache, logs — plus a `Refresh` button.                                                                                                |
+| Search index       | Status pill (Ready / Rebuilding / Unavailable), last rebuild timestamp, `Rebuild` button. See [Full-text search — Index lifecycle](../core-features/search#index-lifecycle). |
+| Auto-clear history | Master switch. Off → cleanup is manual only.                                                                                                                                 |
+| Retention days     | 7 / 30 / 90 / 180 / 365.                                                                                                                                                     |
+| Max items          | 100 / 200 / 500 / 1 000 / 2 000 / 5 000 / Unlimited. Either limit triggers a cleanup pass (Unlimited disables the item-count check entirely).                                |
+| Skip pinned        | Skip pinned entries during cleanup.                                                                                                                                          |
+| Confirm before deleting | On by default. When off, deleting one history item proceeds without asking; `Clear all history` still requires confirmation.                                             |
+| Danger zone        | `Clear cache` (drops blob chunks, history intact), `Clear all history` (irreversible), `Open data folder` (jumps to the on-disk location).                                   |
+
+The data directory paths are listed under
+[Install — Where data lives](../getting-started/install#where-data-lives).
+
+## Mobile sync
+
+Mobile-sync configuration **does not** live under the Settings panel.
+It's exposed on the **Devices** page: switch to the **Mobile sync**
+tab, then click the `Configure` button at the right of the tab bar to
+open the centered **Mobile sync settings** dialog.
+
+Quick reference for what's in that dialog:
+
+| Setting                   | What it does                                                                                                                                                                                   |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Enable mobile sync        | Master switch for the feature. Off → no listener, no Add device, no inbound HTTP traffic on the LAN port.                                                                                      |
+| Enable LAN listener       | Independent toggle for the HTTP listener. The master switch above must also be on for it to do anything.                                                                                       |
+| Bind / advertised IP      | The LAN IPv4 the desktop tells mobile clients to connect to. The actual socket is always bound to `0.0.0.0`; this only changes the URL.                                                        |
+| Port                      | Defaults to **42720** (SPEC §3.2). Custom values let you avoid conflicts.                                                                                                                      |
+| Current listening address | Read-only; shows the URL derived from the persisted settings. This is what mobile clients should target.                                                                                       |
+| Listener bind error       | When the daemon raises `lan_listener_error` (port in use, permission denied, etc.), a red Alert appears at the top of the dialog with the reason — so you can see why the URL isn't reachable. |
+
+<Callout type="info">
+  Leave the Bind/Advertised IP on `Auto` and the dialog's **Current listening address** row will
+  list every RFC1918 candidate so you can copy the one the mobile device can dial; pick a specific
+  interface to fix the row to a single URL. The actual socket always binds to `0.0.0.0` — this
+  picker only controls what gets advertised.
+</Callout>
+
+For the full setup walkthrough, security caveats, and troubleshooting
+checklist, see the dedicated [Mobile sync guide](../core-features/mobile-sync).
+
+## About
+
+Version number, build hash, license, and project links. Includes a
+direct link to
+[GitHub Releases](https://github.com/UniClipboard/UniClipboard/releases)
+for changelogs.
+
+### Update settings
+
+| Setting                        | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-check for updates         | Check for a new version on startup, then periodically (every 6 hours ± jitter) via a background scheduler that keeps running even when the main window is closed and the app is idle in the background. A new version opens a compact update dialog showing the available version, its changelog, and three options: **Skip This Version**, **Remind Me Later**, or **Download Update**. "Download Update" fetches the installer in the background first — while downloading you can dismiss the dialog with "Download in background" and the download keeps going (reopening the dialog restores progress and offers cancel) — and once it finishes the button turns into **Install Now**. Choosing "Skip This Version" permanently dismisses that release — the scheduler will not pop the dialog again for it; choosing "Remind Me Later" simply closes the dialog and you will be reminded on the next check cycle. To avoid nagging during busy release periods, automatic popups are rate-limited: at most one every 72 hours on the stable channel and one every 24 hours on pre-release channels (new versions found during the cooldown accumulate silently and the first popup afterward shows the newest one); manual `Check for updates` is never rate-limited, though when a manual check opens the update dialog it also resets the cooldown timer for automatic popups. On by default. Disable to only ever update via the `Check for updates` button — disabling also suppresses the auto-popup. |
+| Download updates in background | After a check finds a new version, silently fetch the installer so click-to-install is instant. On by default; depends on auto-check being on. The update dialog also includes a toggle to flip this setting on the spot. Automatically skipped on `.deb` / `.rpm` installs — those upgrade via the system package manager, so downloading the installer wouldn't help.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Update channel                 | `Auto` / `Stable` / `Alpha`. Alpha rolls fast; switching prompts a confirmation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+The sidebar update icon (bottom-right) reflects the current state:
+
+- **Amber with a pulsing dot** — a new version is available, waiting for you.
+- **Amber with a progress ring** — the installer is downloading in the background; the dialog lets you cancel.
+- **Green with a check** — the installer is ready; click to install and restart.
+
+## Toggles that **don't** exist (yet)
+
+These come up often but aren't exposed today — worth knowing so you
+don't hunt for them:
+
+- **Close-to-tray vs. close-to-quit** — no separate toggle. Closing
+  the main window leaves the app running in the background; use the
+  tray menu's `Quit` to fully exit.
+- **Notification preferences** — no UI for "notify me when a clip
+  arrives" yet.
+- **Renaming a remote device** — only that device's owner can rename
+  it from their own machine; the new name then syncs into the
+  members list everywhere else.
+- **Space-wide content-type blocklist** — only per-peer gates are
+  available today (in [Devices](../core-features/devices)).
+- **Never use relay** — "LAN-only mode" is the closest knob, but it
+  also cuts off off-LAN peers entirely.
+
+If any of these are blockers for your workflow, file an issue with
+context at
+[github.com/UniClipboard/UniClipboard/issues](https://github.com/UniClipboard/UniClipboard/issues).

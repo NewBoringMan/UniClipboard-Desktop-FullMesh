@@ -1,0 +1,129 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { describe, expect, it } from 'vitest'
+
+const projectRoot = path.resolve(__dirname, '../..')
+
+function read(relativePath: string): string {
+  return fs.readFileSync(path.join(projectRoot, relativePath), 'utf8')
+}
+
+describe('membership E2E hardening', () => {
+  it('passes the workflow tier through a quoted environment variable', () => {
+    const workflow = read('.github/workflows/membership-e2e.yml')
+
+    expect(workflow).toContain(
+      "MEMBERSHIP_TIER: ${{ inputs.tier || (github.event_name == 'pull_request' && 'pr') || 'nightly' }}"
+    )
+    expect(workflow).toContain('run: bash scripts/e2e/run-membership-matrix.sh "$MEMBERSHIP_TIER"')
+    expect(workflow).not.toContain(
+      'run: bash scripts/e2e/run-membership-matrix.sh "${{ inputs.tier'
+    )
+  })
+
+  it('runs current membership checks before merge without the deferred recovery case', () => {
+    const workflow = read('.github/workflows/membership-e2e.yml')
+    const script = read('scripts/e2e/run-membership-matrix.sh')
+    const prCheck = read('.github/workflows/pr-check.yml')
+
+    expect(workflow).toMatch(/^\s{2}pull_request:/m)
+    expect(workflow).toContain("github.event_name == 'pull_request'")
+    expect(workflow).toContain('if [[ "$EVENT_NAME" == "pull_request" ]]; then')
+    expect(workflow).toContain('matrix=[{"name":"Linux","runner":"ubuntu-22.04"')
+    expect(workflow).toContain('matrix=[{"name":"macOS","runner":"macos-latest"')
+    expect(script).toContain(
+      'run_case C1 required "" membership_convergence c1_online_sponsor_chain_converges_and_syncs_directly'
+    )
+    expect(script).not.toContain('r2_permanent_loss_unblocks_an_offline_retained_member')
+    expect(script).not.toContain('h5_offline_readmission_can_be_cancelled')
+    expect(prCheck).toContain('run: bun run test -- --run')
+  })
+
+  it('keeps the membership matrix out of the release dependency chain', () => {
+    const release = read('.github/workflows/release.yml')
+    const workflow = read('.github/workflows/membership-e2e.yml')
+    const script = read('scripts/e2e/run-membership-matrix.sh')
+
+    expect(release).not.toMatch(/^\s+membership-e2e:/m)
+    expect(release).not.toContain('needs: [validate, membership-e2e]')
+    expect(workflow).not.toContain('  workflow_call:')
+    expect(workflow).not.toContain('          - release')
+    expect(script).not.toContain('pr|nightly|release')
+    expect(script).not.toContain('if [[ "$TIER" == "release" ]]')
+  })
+
+  it('uses platform-specific binary names for tar archive fixtures', () => {
+    const releaseAssets = read('tests/e2e/tests/release_assets.rs')
+    const tarFixture = releaseAssets.match(
+      /fn tar_release_extracts_only_the_cli_pair\(\) \{[\s\S]*?\n\}/
+    )?.[0]
+
+    expect(tarFixture).toContain('let cli = binary_name("uniclip");')
+    expect(tarFixture).toContain('let daemon = binary_name("uniclipd");')
+  })
+
+  it('preserves aggregate failures and explains a missing legacy release', () => {
+    const script = read('scripts/e2e/run-membership-matrix.sh')
+
+    expect(script).not.toMatch(
+      /^\s*set\b.*(?:\s-[A-Za-z]*e[A-Za-z]*(?:\s|$)|\s-o\s+errexit(?:\s|$))/m
+    )
+    expect(script).toContain('UC_E2E_LEGACY_RELEASE_DIR is not set; H1-H4 cannot run')
+    expect(script).toContain('H1-H4 were required but could not run')
+    expect(script).toContain("grep -Eq 'test result: ok\\. 1 passed;'")
+  })
+
+  it('references existing membership convergence tests', () => {
+    const script = read('scripts/e2e/run-membership-matrix.sh')
+    const convergence = read('tests/e2e/tests/membership_convergence.rs')
+    const testNames = Array.from(
+      script.matchAll(/run_case\s+\S+\s+\S+\s+\S*\s+membership_convergence\s+(\S+)/g),
+      match => match[1]
+    )
+
+    expect(testNames.length).toBeGreaterThan(0)
+    for (const testName of testNames) {
+      expect(convergence).toContain(`async fn ${testName}()`)
+    }
+  })
+
+  it('guards the E2E-only rendezvous override and release preparation', () => {
+    const wiring = read('crates/uc-bootstrap/src/wiring/desktop_host.rs')
+    const releases = read('tests/e2e/src/releases.rs')
+    const convergence = read('tests/e2e/tests/membership_convergence.rs')
+
+    expect(wiring).toContain('engine_config.with_rendezvous_base_url(base_url.trim().to_string())')
+    expect(releases).toMatch(/\.timeout\((?:std::time::)?Duration::from_secs\(60\)\)/)
+    expect(convergence.match(/terminate_child\(&mut child\)/g)).toHaveLength(2)
+  })
+
+  it('uses the production log resolver for profile cleanup', () => {
+    const profile = read('tests/e2e/src/profile.rs')
+    const manifest = read('tests/e2e/Cargo.toml')
+
+    expect(profile).toContain('uc_app_paths::app_log_dir_for_profile(Some(profile))')
+    expect(manifest).toContain('uc-app-paths = { path = "../../crates/uc-app-paths" }')
+  })
+
+  it('runs the cargo audit exception guard in CI', () => {
+    const packageJson = JSON.parse(read('package.json')) as { scripts: Record<string, string> }
+    const workflow = read('.github/workflows/pr-check.yml')
+    const guard = read('scripts/architecture/check-cargo-audit-exceptions.mjs')
+    const guardPath = path.join(
+      projectRoot,
+      'scripts/architecture/check-cargo-audit-exceptions.mjs'
+    )
+
+    expect(fs.existsSync(guardPath)).toBe(true)
+    expect(packageJson.scripts['check:cargo-audit-exceptions']).toBe(
+      'node scripts/architecture/check-cargo-audit-exceptions.mjs'
+    )
+    expect(workflow).toContain('run: bun run check:cargo-audit-exceptions')
+    expect(guard).not.toContain("run('git'")
+    expect(guard).toContain("const RUST_SOURCE_ROOTS = ['apps', 'crates', 'src-tauri']")
+    expect(guard).toContain("'x86_64-unknown-linux-gnu'")
+    expect(guard).toContain("'x86_64-pc-windows-msvc'")
+    expect(guard).toContain("'x86_64-apple-darwin'")
+    expect(guard).toContain("'wasm32-unknown-unknown'")
+  })
+})

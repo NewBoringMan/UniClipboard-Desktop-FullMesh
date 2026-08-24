@@ -1,0 +1,47 @@
+[package]
+name = "uc-daemon-local"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+description = "Local daemon runtime metadata and process coordination"
+
+[features]
+test-helpers = []
+
+[lib]
+name = "uc_daemon_local"
+path = "src/lib.rs"
+
+[dependencies]
+uc-daemon-contract = { path = "../uc-daemon-contract" }
+# ADR-008 P5-0: thin process-management primitives (process_metadata / socket /
+# spawn / spawn_contract) live here and are re-exported from this crate's
+# lib.rs under their original module paths.
+uc-daemon-process = { path = "../uc-daemon-process" }
+anyhow = "1.0"
+fs2 = "0.4"
+# Used unconditionally by auth / instance_lock, all of which compile on every
+# platform. Keeping them cfg(unix)-only broke the Windows build of every crate
+# that links this one (uniclipd, the GUI via uc-desktop, the CLI): the modules
+# `use` these crates while the deps were absent on Windows. The genuinely
+# unix-only syscalls (EAGAIN in instance_lock) are already `#[cfg(unix)]`-gated
+# in the source, so only `libc` stays target-scoped below.
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Constant-time comparison for the bearer token (avoids a local timing
+# side-channel when validating candidate tokens). Already used elsewhere in the
+# workspace (uc-infra pin_hash, uc-platform).
+subtle = "2.5"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
+
+[lints]
+workspace = true

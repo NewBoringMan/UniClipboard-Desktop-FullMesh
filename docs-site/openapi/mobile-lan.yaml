@@ -1,0 +1,873 @@
+openapi: 3.1.0
+info:
+  title: UniClipboard Mobile LAN API
+  version: '1.0.0'
+  summary: SyncClipboard-compatible LAN endpoints exposed by the desktop daemon.
+  description: |
+    The desktop daemon exposes a small SyncClipboard-compatible HTTP service on the
+    LAN so a paired mobile client (iOS Shortcuts, Android, or any SyncClipboard
+    client) can read and push clipboard items.
+
+    Every endpoint requires **HTTP Basic Authentication** except `GET /healthz`.
+    Credentials are minted on the desktop side when the user pairs a mobile device.
+    Username and password are bound to a single registered device. Unauthenticated
+    or wrong-credential requests get `401 Unauthorized` with
+    `WWW-Authenticate: Basic`.
+
+    `GET /healthz` is public by design: it is a constant-cost liveness probe for
+    offline clients, and authenticating it would mean running an Argon2id
+    verification per probe. It returns no identifying information — see its
+    description below.
+
+    The wire format follows the SyncClipboard project's JSON schema. Field casing
+    is fixed by that protocol; the desktop also accepts PascalCase aliases on
+    the request side because iOS Shortcuts emits `Type` (PascalCase) for the
+    `type` field while the rest of the body is camelCase.
+
+    Metadata-only requests such as `PUT /SyncClipboard.json` are capped at
+    **16 MiB**. Binary uploads through `PUT /file/{dataName}` and multipart
+    `POST /api/history` are streamed to local staging and capped at **10 GiB**
+    per uploaded file.
+  contact:
+    name: UniClipboard
+    url: https://github.com/mkdir700/uniclipboard
+servers:
+  - url: http://{host}:{port}
+    description: Desktop daemon on the LAN
+    variables:
+      host:
+        default: 192.168.1.10
+        description: LAN IP of the desktop running UniClipboard
+      port:
+        default: '42720'
+        description: Port the daemon advertised during pairing (SPEC §3.2 default)
+tags:
+  - name: Probe
+    description: Lightweight compatibility probes used by SyncClipboard clients.
+  - name: Health
+    description: UniClipboard-private liveness probe for offline clients (not part of the SyncClipboard protocol).
+  - name: Clipboard
+    description: Clipboard metadata read/write (SyncClipboard JSON document).
+  - name: Push
+    description: UniClipboard-private push channel signaling clipboard changes (not part of the SyncClipboard protocol).
+  - name: History
+    description: Android-compatible history API bridge for the current clipboard item.
+  - name: File
+    description: Binary payload transfer for image and file clipboard items.
+  - name: Compatibility
+    description: Routes accepted for client compatibility without full server-side history semantics.
+security:
+  - basicAuth: []
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      operationId: getHealthz
+      security: []
+      summary: Liveness probe for the mobile LAN listener
+      description: |
+        UniClipboard-private extension (not part of the SyncClipboard protocol):
+        a constant-cost liveness check for clients that have gone offline and
+        need to discover when the listener is reachable again.
+
+        **Public — no authentication.** An `Authorization` header, if sent, is
+        ignored: no device lookup and no password verification happen. This is
+        deliberate. The endpoint performs no database, clipboard, blob, crypto,
+        or hashing work, so a probe costs a constant amount regardless of who
+        sends it. Requiring Basic Auth would instead spend a memory-hard
+        Argon2id verification (m=64MB, t=3, p=4) on every probe — the abuse
+        vector rather than a defense against it.
+
+        The response reveals only that a listener answers at this address —
+        something a TCP connect already reveals. It carries no version, device
+        identity, Space id, username, hostname, or clipboard information, and
+        it does not update the device's `last_seen` or any analytics state.
+
+        A `204` means the listener is live and accepting SyncClipboard requests.
+        It does **not** mean credentials are valid, the daemon is unlocked, or
+        the next sync will succeed — a successful probe should trigger one real
+        sync, which remains the authority on sync state.
+
+        Third-party and older SyncClipboard servers do not implement this path
+        and return `404`; clients should treat that as "no health capability"
+        and fall back to a lower-frequency probe against the regular endpoints.
+
+        Deployment note: a reverse proxy must forward this to the same upstream
+        as `/SyncClipboard.json` and must not cache it (the server sends
+        `Cache-Control: no-store`). The daemon control API's `GET /health` is a
+        different endpoint on a different listener and must not stand in for it.
+      responses:
+        '204':
+          description: |
+            The listener is live. Empty body, no identifying information.
+          headers:
+            Cache-Control:
+              description: Always `no-store` — a cached probe would report a dead daemon as alive.
+              schema:
+                type: string
+                const: no-store
+        '503':
+          description: |
+            The listener is draining: cancellation has been signalled but the
+            socket has not finished shutting down. Empty body.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            Retry-After:
+              description: Seconds to wait before probing again.
+              schema:
+                type: string
+                const: '1'
+        '405':
+          description: Returned for any method other than GET (and HEAD, which the framework answers body-free).
+  /:
+    get:
+      tags: [Probe]
+      operationId: getRootProbe
+      summary: Probe server reachability
+      description: Compatibility probe. Returns a simple success string and does not read or write clipboard data.
+      responses:
+        '200':
+          description: Server is reachable.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: Server is running.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/time:
+    get:
+      tags: [Probe]
+      operationId: getApiTime
+      summary: Fetch server time
+      description: Compatibility probe used by SyncClipboard clients.
+      responses:
+        '200':
+          description: Current server time as an RFC 3339 string.
+          content:
+            application/json:
+              schema:
+                type: string
+                format: date-time
+              example: '2026-05-13T13:43:38Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/version:
+    get:
+      tags: [Probe]
+      operationId: getApiVersion
+      summary: Fetch server version
+      description: Compatibility probe used by SyncClipboard clients.
+      responses:
+        '200':
+          description: UniClipboard server version string.
+          content:
+            application/json:
+              schema:
+                type: string
+              example: UniClipboard 1.0.0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /version:
+    get:
+      tags: [Probe]
+      operationId: getVersion
+      summary: Fetch server version
+      description: Alias of `GET /api/version`.
+      responses:
+        '200':
+          description: UniClipboard server version string.
+          content:
+            application/json:
+              schema:
+                type: string
+              example: UniClipboard 1.0.0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /SyncClipboard.json:
+    get:
+      tags: [Clipboard]
+      operationId: getSyncClipboard
+      summary: Fetch the latest clipboard item
+      description: |
+        Returns the most recent clipboard entry on the desktop, translated into
+        the SyncClipboard wire DTO. If the desktop has no clipboard item yet,
+        the response is an empty Text document for compatibility.
+
+        For Image / File items, the binary payload is fetched separately via
+        `GET /file/{dataName}`.
+      responses:
+        '200':
+          description: Latest clipboard entry, or an empty Text document when no entry exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncClipboardDoc'
+              examples:
+                text:
+                  summary: Text clipboard
+                  value:
+                    type: Text
+                    text: hello from desktop
+                    hasData: false
+                    size: 18
+                    hash: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+                image:
+                  summary: Image clipboard
+                  value:
+                    type: Image
+                    text: ''
+                    dataName: clipboard.png
+                    hasData: true
+                    size: 142536
+                    hash: 9b2cf964fa8c0b5a...
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Clipboard snapshot port failure on the desktop.
+    put:
+      tags: [Clipboard]
+      operationId: putSyncClipboard
+      summary: Push a clipboard item from the mobile device
+      description: |
+        Accepts a SyncClipboard wire DTO. The body is decoded, mapped into the
+        application model, and applied through the inbound apply pipeline as if
+        it came from a peer device.
+
+        Both camelCase and PascalCase keys are accepted (`Type`, `HasData`,
+        `DataName`, etc.) because the iOS Shortcuts client emits a mixed-case
+        body.
+
+        Decode failure produces `400 Bad Request`; metadata payloads larger
+        than 16 MiB produce `413 Payload Too Large`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncClipboardDoc'
+            examples:
+              text:
+                summary: Push plain text
+                value:
+                  type: Text
+                  text: hello from phone
+                  hasData: false
+                  size: 16
+              file:
+                summary: Push file metadata (PascalCase as emitted by iOS Shortcuts)
+                value:
+                  hasData: true
+                  Type: File
+                  dataName: foo.pdf
+                  text: foo.pdf
+      responses:
+        '200':
+          description: |
+            Applied. The classic SyncClipboard protocol never defined a PUT
+            response body (an empty `200` is the historical contract), so this
+            is a purely additive extension: legacy and third-party
+            SyncClipboard clients that only check the status code ignore it
+            safely. UniClipboard's own mobile sync engine reads `contentId`
+            back to learn the server identity of the write it just made,
+            without a follow-up `GET`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncClipboardPutAck'
+              examples:
+                applied:
+                  summary: Applied with a learned content identity
+                  value:
+                    contentId: blake3v1:9b2cf964fa8c0b5a...
+        '400':
+          description: Body could not be parsed as a SyncClipboard document or `type` value is unknown.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: Body exceeds 16 MiB.
+        '500':
+          description: Inbound apply pipeline failure on the desktop.
+  /api/sse/clipboard:
+    get:
+      tags: [Push]
+      operationId: getSseClipboard
+      summary: Subscribe to clipboard change signals (SSE)
+      description: |
+        UniClipboard-private extension (not part of the SyncClipboard
+        protocol): a Server-Sent Events stream that signals when the desktop's
+        active clipboard changes, so a client can call
+        `GET /SyncClipboard.json` immediately instead of polling.
+
+        The stream carries **signals only** — never clipboard content. Events:
+
+        - `hello` — sent once at connect time; payload
+          `{"server_time_ms": <int64>}`. The client should pull once
+          unconditionally on receiving it.
+        - `update` — the clipboard advanced; payload
+          `{"content_id": "blake3v1:<hex>", "server_time_ms": <int64>}`.
+          `content_id` is an opaque content identity for deduplication, not
+          content itself.
+        - `resync` — the server dropped signal(s) for this connection; payload
+          `{"server_time_ms": <int64>}`. The client should pull once.
+
+        A comment heartbeat (`: ping`) is written every 25 seconds; clients
+        should treat more than twice that with no bytes as a dead connection
+        and reconnect. There is no event replay on reconnect — a reconnecting
+        client pulls once unconditionally.
+
+        At most 2 concurrent streams per registered device; opening a third
+        closes the oldest. The server also ends the stream when the device is
+        revoked or its credentials are rotated.
+      responses:
+        '200':
+          description: Event stream; stays open until either side disconnects.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              example: |
+                event: hello
+                data: {"server_time_ms":1750000000000}
+
+                event: update
+                data: {"content_id":"blake3v1:9f8a...","server_time_ms":1750000012345}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/history:
+    post:
+      tags: [History]
+      operationId: postHistoryRecord
+      summary: Push a SyncClipboard Android history record
+      description: |
+        Android-compatible inbound path for text, image, and file uploads.
+
+        URL-encoded requests are used for metadata-only entries. Multipart
+        requests may include a `data` file part; file bytes are streamed to
+        local staging and share the 10 GiB upload cap used by `PUT /file/{dataName}`.
+
+        Some Android clients send images as `application/octet-stream`. The
+        desktop sniffs the file name and leading bytes to recover common image
+        MIME types before applying the clipboard item.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/HistoryUploadFields'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HistoryMultipartUpload'
+      responses:
+        '200':
+          description: Record accepted and mapped into the current clipboard.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryRecord'
+        '400':
+          description: Required fields are missing, the item type is invalid, or the upload combines unsupported fields.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: Metadata body exceeds 16 MiB or multipart file body exceeds 10 GiB.
+        '500':
+          description: Inbound apply pipeline or staging failure on the desktop.
+  /api/history/query:
+    post:
+      tags: [History]
+      operationId: queryHistoryRecords
+      summary: Query current history compatibility view
+      description: |
+        Compatibility bridge. Returns the current latest clipboard item as a
+        one-element list, or an empty list when there is no current item. It is
+        not a full paginated history query.
+      responses:
+        '200':
+          description: Current compatibility view.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HistoryRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Clipboard snapshot port failure on the desktop.
+  /api/history/statistics:
+    get:
+      tags: [History]
+      operationId: getHistoryStatistics
+      summary: Fetch current history compatibility statistics
+      description: |
+        Compatibility bridge. Statistics are computed from the current latest
+        clipboard item, or all zeros when there is no current item. It is not a
+        full history database summary.
+      responses:
+        '200':
+          description: Current compatibility statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryStatistics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Clipboard snapshot port failure on the desktop.
+  /api/history/clear:
+    delete:
+      tags: [Compatibility]
+      operationId: clearHistoryCompatibility
+      summary: Accept a history clear request
+      description: |
+        Compatibility-only route. The request is accepted so clients can
+        continue their flow, but UniClipboard does not clear the real clipboard
+        history through this endpoint.
+      responses:
+        '200':
+          description: Compatibility response. No records are deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted:
+                    type: integer
+                    example: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/history/{profileId}:
+    parameters:
+      - name: profileId
+        in: path
+        required: true
+        description: SyncClipboard profile id in `{type}-{hash}` form, for example `Image-ABCDEF`.
+        schema:
+          type: string
+        example: Image-0B13A2265544DE3C8C1286E4B854D39833A49BDAA3F82114AE19F55B7F08FBB2
+    get:
+      tags: [History]
+      operationId: getHistoryRecord
+      summary: Fetch a current history record
+      description: |
+        Compatibility bridge to the current latest clipboard item. For image
+        and file records, UniClipboard can satisfy a same-type request even
+        when the client's uploaded hash differs from the server-recomputed hash.
+      responses:
+        '200':
+          description: Current record matched the requested profile id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryRecord'
+        '400':
+          description: Invalid `profileId` format.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No current item matched the requested profile id.
+        '500':
+          description: Clipboard snapshot port failure on the desktop.
+  /api/history/{profileId}/data:
+    parameters:
+      - name: profileId
+        in: path
+        required: true
+        description: SyncClipboard profile id in `{type}-{hash}` form, for example `Image-ABCDEF`.
+        schema:
+          type: string
+        example: Image-0B13A2265544DE3C8C1286E4B854D39833A49BDAA3F82114AE19F55B7F08FBB2
+    get:
+      tags: [History]
+      operationId: getHistoryRecordData
+      summary: Download data for a current history record
+      description: |
+        Compatibility bridge to `GET /file/{dataName}` for the current latest
+        image or file item. It does not expose older historical payloads.
+      responses:
+        '200':
+          description: Binary payload for the current matching record.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid `profileId` format.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No current item or payload matched the requested profile id.
+        '500':
+          description: Snapshot port failure or staging I/O failure on the desktop.
+  /api/history/{type}/{hash}:
+    parameters:
+      - name: type
+        in: path
+        required: true
+        description: SyncClipboard item type.
+        schema:
+          type: string
+          enum: [Text, Image, File, Group]
+      - name: hash
+        in: path
+        required: true
+        description: Item hash, or an embedded `{type}-{hash}` profile id.
+        schema:
+          type: string
+    patch:
+      tags: [Compatibility]
+      operationId: patchHistoryRecord
+      summary: Accept a history metadata update request
+      description: |
+        Compatibility-only route. It returns the current matching record, but
+        UniClipboard does not persist starred, pinned, deleted, or other
+        history-state mutations through this endpoint.
+      responses:
+        '200':
+          description: Current record matched the requested item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryRecord'
+        '400':
+          description: Invalid type, hash, or embedded profile id.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No current item matched the requested item.
+        '500':
+          description: Clipboard snapshot port failure on the desktop.
+  /file:
+    get:
+      tags: [Compatibility]
+      operationId: getFileFolderCompatibility
+      summary: Probe the SyncClipboard file folder route
+      description: |
+        Compatibility-only route. It confirms that the `/file` folder endpoint
+        exists, but actual file bytes are handled by `/file/{dataName}`.
+      responses:
+        '200':
+          description: Compatibility probe accepted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Compatibility]
+      operationId: deleteFileFolderCompatibility
+      summary: Accept a file-folder cleanup request
+      description: |
+        Compatibility-only route. The request is accepted so clients can
+        continue their flow, but UniClipboard does not delete staged clipboard
+        payloads through this endpoint.
+      responses:
+        '200':
+          description: Compatibility request accepted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /file/{dataName}:
+    parameters:
+      - name: dataName
+        in: path
+        required: true
+        description: |
+          Filename advertised by the matching `SyncClipboard.json` document.
+          Used to look up the staged payload for Image / File clipboard items.
+        schema:
+          type: string
+        example: clipboard.png
+    get:
+      tags: [File]
+      operationId: getClipboardFile
+      summary: Download the binary payload for a clipboard item
+      description: |
+        Returns the raw bytes of the most recent Image / File clipboard entry
+        whose `dataName` matches. The `Content-Type` header reflects the
+        sniffed MIME type.
+      responses:
+        '200':
+          description: |
+            Binary payload for the requested file. The actual `Content-Type`
+            response header reflects the sniffed MIME (e.g. `image/png`,
+            `image/jpeg`, etc.) and not necessarily `application/octet-stream`.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No clipboard entry matched `dataName`, or its staged payload is gone.
+        '500':
+          description: Snapshot port failure or staging I/O failure on the desktop.
+    head:
+      tags: [File]
+      operationId: headClipboardFile
+      summary: Check whether a binary payload exists
+      description: |
+        Compatibility HEAD request for the same resource as `GET /file/{dataName}`.
+        It is useful for clients that probe the payload before downloading it.
+      responses:
+        '200':
+          description: Binary payload exists.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No clipboard entry matched `dataName`, or its staged payload is gone.
+        '500':
+          description: Snapshot port failure or staging I/O failure on the desktop.
+    put:
+      tags: [File]
+      operationId: putClipboardFile
+      summary: Upload a binary payload to stage as a clipboard item
+      description: |
+        Accepts the raw bytes of an image or file. The desktop stages the bytes
+        into the inbound mobile buffer, where they will be paired with a
+        subsequent `PUT /SyncClipboard.json` describing the same `dataName`.
+
+        ### MIME handling
+
+        Some clients send `application/octet-stream` or omit `Content-Type`.
+        The desktop sniffs the file's magic bytes, and falls back to the
+        extension, to recover an accurate `image/*` MIME so desktop clipboard
+        APIs can render the image correctly. If the sniff fails, the original
+        `Content-Type` is kept.
+
+        Recognised image magics and extensions: JPEG, PNG, GIF, WEBP, BMP,
+        TIFF, HEIC, and HEIF.
+
+        Maximum body size is 10 GiB. The body is streamed to local staging; it
+        is not buffered fully in memory.
+      requestBody:
+        required: true
+        description: |
+          Raw bytes. Set `Content-Type` to the actual MIME of the upload
+          (`image/png`, `image/jpeg`, `application/pdf`, etc.) when known. If
+          `application/octet-stream` is sent for image uploads, the desktop
+          will sniff the magic bytes and recover the correct `image/*` MIME.
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Bytes accepted and staged.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: Body exceeds 10 GiB.
+        '500':
+          description: Inbound apply pipeline failure on the desktop.
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: |
+        Username and password are minted on the desktop during device pairing
+        and are bound to a single mobile device record.
+  responses:
+    Unauthorized:
+      description: |
+        Missing, malformed, or wrong Basic credentials. The response carries
+        `WWW-Authenticate: Basic`.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: 'Basic realm="UniClipboard"'
+  schemas:
+    SyncClipboardDoc:
+      type: object
+      description: |
+        SyncClipboard wire DTO. Field casing is fixed by the SyncClipboard
+        project's protocol: the value of `type` is PascalCase, all keys are
+        camelCase. On the request side the desktop also accepts PascalCase
+        aliases (`Type`, `Text`, `DataName`, `HasData`, `Size`, `Hash`).
+      required: [type, hasData, size]
+      properties:
+        type:
+          description: Item kind. PascalCase by SyncClipboard convention.
+          type: string
+          enum: [Text, Image, File, Group]
+        text:
+          description: |
+            For Text items, the clipboard text. For Image / File items, this
+            field is typically the displayed filename or empty.
+          type: string
+          default: ''
+        dataName:
+          description: |
+            Filename associated with the binary payload. Required for Image /
+            File items, omitted for plain Text.
+          type: string
+          nullable: true
+        hasData:
+          description: |
+            True iff a binary payload accompanies this entry (i.e. an Image or
+            File item with bytes available via `/file/{dataName}`).
+          type: boolean
+          default: false
+        size:
+          description: Size in bytes of the binary payload (0 for plain Text).
+          type: integer
+          format: int64
+          minimum: 0
+          default: 0
+        hash:
+          description: |
+            SHA-256 hex digest of the wire content. Mobile clients may omit it
+            on `PUT`; the desktop fills it in on `GET` for SyncClipboard
+            desktop-client compatibility.
+          type: string
+          nullable: true
+          example: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+    SyncClipboardPutAck:
+      type: object
+      description: |
+        Response body for `PUT /SyncClipboard.json`. Purely additive relative
+        to the classic SyncClipboard protocol (historically an empty `200`);
+        legacy clients that don't parse the body are unaffected.
+      properties:
+        contentId:
+          description: |
+            Server-assigned stable identity for the content that was just
+            written. Present when the write was applied or recognized as a
+            duplicate of existing content; omitted if the daemon could not
+            determine one for this response.
+          type: string
+          nullable: true
+          example: blake3v1:9b2cf964fa8c0b5a...
+    HistoryUploadFields:
+      type: object
+      description: Fields accepted by `POST /api/history` for metadata-only or multipart uploads.
+      required: [type, hash]
+      properties:
+        type:
+          type: string
+          enum: [Text, Image, File, Group]
+        hash:
+          type: string
+          description: Client-provided item hash.
+        text:
+          type: string
+          description: Clipboard text or display filename.
+          default: ''
+        dataName:
+          type: string
+          description: Filename associated with an image or file payload.
+        hasData:
+          type: boolean
+          description: Whether a binary payload is associated with this record.
+          default: false
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Binary payload size in bytes.
+        createTime:
+          type: string
+          format: date-time
+        lastModified:
+          type: string
+          format: date-time
+        lastAccessed:
+          type: string
+          format: date-time
+        starred:
+          type: boolean
+          default: false
+        pinned:
+          type: boolean
+          default: false
+        version:
+          type: integer
+          default: 0
+        isDeleted:
+          type: boolean
+          default: false
+    HistoryMultipartUpload:
+      allOf:
+        - $ref: '#/components/schemas/HistoryUploadFields'
+        - type: object
+          properties:
+            data:
+              type: string
+              format: binary
+              description: Optional file part for Image or File uploads.
+    HistoryRecord:
+      type: object
+      required:
+        - hash
+        - type
+        - text
+        - createTime
+        - lastModified
+        - lastAccessed
+        - starred
+        - pinned
+        - size
+        - hasData
+        - version
+        - isDeleted
+      properties:
+        hash:
+          type: string
+        type:
+          type: string
+          enum: [Text, Image, File, Group]
+        text:
+          type: string
+        createTime:
+          type: string
+          format: date-time
+        lastModified:
+          type: string
+          format: date-time
+        lastAccessed:
+          type: string
+          format: date-time
+        starred:
+          type: boolean
+        pinned:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+        hasData:
+          type: boolean
+        version:
+          type: integer
+        isDeleted:
+          type: boolean
+    HistoryStatistics:
+      type: object
+      required:
+        - totalCount
+        - starredCount
+        - deletedCount
+        - activeCount
+        - totalFileSizeMb
+      properties:
+        totalCount:
+          type: integer
+          minimum: 0
+        starredCount:
+          type: integer
+          minimum: 0
+        deletedCount:
+          type: integer
+          minimum: 0
+        activeCount:
+          type: integer
+          minimum: 0
+        totalFileSizeMb:
+          type: number
+          minimum: 0

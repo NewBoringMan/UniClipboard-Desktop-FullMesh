@@ -1,0 +1,251 @@
+import type { ErrorEvent, EventHint } from '@sentry/core'
+import * as Sentry from '@sentry/react'
+import React from 'react'
+import {
+  Routes,
+  createRoutesFromChildren,
+  matchRoutes,
+  useLocation,
+  useNavigationType,
+} from 'react-router'
+import { redactSensitiveArgs } from '@/observability/redaction'
+
+const sentryEnabled = Boolean(import.meta.env.VITE_SENTRY_DSN)
+export const DEVICE_ROLE_WEBVIEW = 'webview'
+
+/**
+ * localStorage 中镜像 `general.telemetryEnabled` 的键名。
+ *
+ * 由 SettingContext 的 useEffect 写入；本模块在加载阶段（initSentry 之前）
+ * 同步读取，作为 `sentryRuntimeEnabled` 的初始值，让"用户上次关闭遥测"的
+ * 偏好在启动早期窗口（daemon RPC 返回前）就能生效，不依赖异步 settings load。
+ *
+ * 后端等价机制是 `uc-bootstrap::tracing` 在 sentry::init 之前同步读
+ * settings.json 后调 `telemetry_gate::set_enabled`，本镜像是前端无法同步
+ * 读磁盘下的等价物。
+ */
+const TELEMETRY_MIRROR_KEY = 'uc.telemetry_enabled'
+
+function readTelemetryMirror(): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return false
+  }
+  try {
+    return window.localStorage.getItem(TELEMETRY_MIRROR_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 运行时遥测开关，镜像 `general.telemetryEnabled`。
+ *
+ * 启动时同步从 localStorage 读取上次确认过的用户偏好：
+ * - 没值（首次启动）/ 上次为 false → 默认 `false`，启动早期事件被丢弃。
+ * - 上次为 true → `true`，启动早期事件也能上传。
+ *
+ * SettingContext 在 daemon 返回设置后会再次调 setFrontendSentryEnabled
+ * 同步到磁盘真值，并刷新 localStorage 镜像。
+ */
+let sentryRuntimeEnabled = readTelemetryMirror()
+
+export function setFrontendSentryEnabled(enabled: boolean): void {
+  sentryRuntimeEnabled = enabled
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem(TELEMETRY_MIRROR_KEY, String(enabled))
+    } catch {
+      // localStorage 满 / 被禁用时静默失败，仅影响下次启动早期窗口的精度。
+    }
+  }
+  syncFrontendReplayEnabled(enabled)
+}
+
+function syncFrontendReplayEnabled(enabled: boolean): void {
+  if (!sentryEnabled) return
+
+  const replay = Sentry.getReplay()
+  if (!replay) return
+
+  if (enabled) {
+    if (!replay.getRecordingMode()) {
+      replay.startBuffering()
+    }
+    return
+  }
+
+  void replay.stop()
+}
+
+/**
+ * 基线 trace 采样率，前端的单一真相源。
+ *
+ * 与后端 `sentry_gate::BASE_TRACE_SAMPLE_RATE` 对称;两个 DSN 指向不同
+ * Sentry 项目,配额独立,所以数值不需要一致。
+ */
+export const TRACES_SAMPLE_RATE = import.meta.env.DEV ? 1.0 : 0.1
+
+/**
+ * 最终 envelope 出口 gate,对应后端的 `TelemetryGatedTransport`。
+ *
+ * 关闭遥测时在这里丢弃,而不是只靠 `beforeSend` 系列钩子:那些钩子每个只
+ * 管一种载荷,而 session(release-health)、client report 这类 envelope
+ * 不经过任何 `beforeSend`,只有 transport 能拦住。这一层也自动覆盖了
+ * "切换前已采样、切换后才结束"的 Transaction。
+ *
+ * 包在 `makeFetchTransport` 外面而不是里面:后者内部已经带缓冲与限流队列,
+ * 从外面拦截才能保证被丢弃的 envelope 根本不进队列。
+ */
+function makeTelemetryGatedTransport(
+  options: Parameters<typeof Sentry.makeFetchTransport>[0]
+): ReturnType<typeof Sentry.makeFetchTransport> {
+  const transport = Sentry.makeFetchTransport(options)
+  return {
+    send: envelope => {
+      if (!sentryRuntimeEnabled) {
+        return Promise.resolve({})
+      }
+      return transport.send(envelope)
+    },
+    flush: timeout => transport.flush(timeout),
+  }
+}
+
+const getTauriPlatform = (): string => {
+  if (typeof window === 'undefined' || !('__TAURI__' in window)) {
+    return 'unknown'
+  }
+
+  const tauriWindow = window as typeof window & {
+    __TAURI__?: { platform?: string }
+  }
+
+  return tauriWindow.__TAURI__?.platform ?? 'unknown'
+}
+
+export function initSentry(): void {
+  if (!sentryEnabled) {
+    return
+  }
+
+  const beforeSend: (event: ErrorEvent, hint: EventHint) => ErrorEvent | null = (event, _hint) => {
+    if (!sentryRuntimeEnabled) {
+      return null
+    }
+    const type = event.exception?.values?.[0]?.type
+    if (type === 'ResizeObserver loop limit exceeded') {
+      return null
+    }
+    if (event.extra) {
+      event.extra = redactSensitiveArgs(event.extra) as Record<string, unknown>
+    }
+    return event
+  }
+
+  const beforeBreadcrumb = (breadcrumb: Sentry.Breadcrumb): Sentry.Breadcrumb | null => {
+    if (!sentryRuntimeEnabled) {
+      return null
+    }
+    if (breadcrumb.data) {
+      breadcrumb.data = redactSensitiveArgs(breadcrumb.data) as Record<string, unknown>
+    }
+    return breadcrumb
+  }
+
+  Sentry.init({
+    dsn: import.meta.env.VITE_SENTRY_DSN,
+    transport: makeTelemetryGatedTransport,
+    // 关闭遥测时返回 0,连 span 都不记录。已采样的 Transaction 若在切换后
+    // 才结束,由上面的 transport gate 兜住,这里不需要再加
+    // `beforeSendTransaction`。`inheritOrSampleWith` 复刻了原
+    // `tracesSampleRate` 的分布式追踪继承语义(先 parentSampleRate,
+    // 再 parentSampled,最后 fallback)。
+    tracesSampler: samplingContext => {
+      if (!sentryRuntimeEnabled) {
+        return 0
+      }
+      return samplingContext.inheritOrSampleWith(TRACES_SAMPLE_RATE)
+    },
+    replaysSessionSampleRate: 0,
+    replaysOnErrorSampleRate: 1.0,
+    environment: import.meta.env.VITE_APP_ENV ?? import.meta.env.MODE,
+    release: import.meta.env.VITE_APP_VERSION,
+    sendDefaultPii: true,
+    enableLogs: true,
+    debug: import.meta.env.DEV,
+    integrations: [
+      Sentry.reactRouterV7BrowserTracingIntegration({
+        useEffect: React.useEffect,
+        useLocation,
+        useNavigationType,
+        createRoutesFromChildren,
+        matchRoutes,
+      }),
+      Sentry.replayIntegration({
+        beforeErrorSampling: () => sentryRuntimeEnabled,
+      }),
+      Sentry.consoleLoggingIntegration({ levels: ['log', 'info', 'warn', 'error'] }),
+    ],
+    beforeSend,
+    beforeBreadcrumb,
+    beforeSendLog: log => {
+      if (!sentryRuntimeEnabled) {
+        return null
+      }
+      if (log.attributes) {
+        log.attributes = redactSensitiveArgs(log.attributes) as Record<string, unknown>
+      }
+      return log
+    },
+    initialScope: {
+      tags: {
+        platform: getTauriPlatform(),
+      },
+    },
+  })
+  syncFrontendReplayEnabled(sentryRuntimeEnabled)
+}
+
+/**
+ * `applyDeviceMetaToSentry` 接收的设备和应用元数据。
+ * 形状与 `src/api/runtime.ts::DeviceMeta` 保持一致；这里单独声明，避免本模块
+ * 引入 Tauri 相关依赖，方便浏览器环境下的 Vitest 测试。
+ */
+export interface SentryDeviceMeta {
+  deviceId: string
+  deviceRole: string
+  platform: string
+  appVersion: string
+  appChannel: string
+}
+
+/**
+ * 把 `get_device_meta` 返回的设备和应用元数据写入 Sentry 全局 scope。
+ * 这与 Rust 侧 `uc-bootstrap::tracing` 里的 scope 写入保持同一套标签，
+ * 让 webview 和 Rust 主进程事件能按 `device.id` 关联。
+ *
+ * 注意:webview 自身的角色固定为 `webview`,而 Rust 主进程上报的
+ * `deviceRole`(`gui-host` / `daemon` / `cli`)挂在二级 tag
+ * `device.host_role` 上 —— 这样一台机器的两个进程在 Sentry 上既能用 `device.id`
+ * 聚合,又能用 role 区分。
+ */
+export function applyDeviceMetaToSentry(meta: SentryDeviceMeta): void {
+  if (!sentryEnabled) {
+    return
+  }
+  Sentry.setUser({ id: meta.deviceId })
+  Sentry.setTag('device.id', meta.deviceId)
+  Sentry.setTag('device.role', DEVICE_ROLE_WEBVIEW)
+  Sentry.setTag('device.host_role', meta.deviceRole)
+  Sentry.setTag('device.platform', meta.platform)
+  Sentry.setTag('app.version', meta.appVersion)
+  Sentry.setTag('app.channel', meta.appChannel)
+}
+
+/**
+ * Sentry-instrumented Routes component.
+ * Use this instead of `Routes` to get parameterized navigation tracing.
+ */
+export const SentryRoutes = Sentry.withSentryReactRouterV7Routing(Routes)
+
+export { Sentry, sentryEnabled }

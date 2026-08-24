@@ -1,0 +1,51 @@
+[package]
+name = "uc-desktop"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+description = "Desktop host for UniClipboard runtime, daemon mode, local API, and desktop event sources"
+
+[lib]
+name = "uc_desktop"
+path = "src/lib.rs"
+
+[dependencies]
+uc-observability = { path = "../uc-observability" }
+uc-daemon-contract = { path = "../uc-daemon-contract" }
+uc-daemon-process = { path = "../uc-daemon-process" }
+uc-daemon-client = { path = "../uc-daemon-client" }
+# Lightweight directory-layout authority — resolves app data/cache roots without
+# pulling in the heavyweight uc-platform or uc-bootstrap dependency trees.
+uc-app-paths = { path = "../uc-app-paths" }
+tokio = { version = "1", features = ["full", "test-util"] }
+tokio-util = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1.0"
+async-trait = "0.1"
+thiserror = "1"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+gethostname = "1.1"
+url = "2"
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+  "rustls-tls-webpki-roots",
+] }
+
+[dev-dependencies]
+cargo_metadata = "0.19.2"
+uc-daemon-process = { path = "../uc-daemon-process", features = [
+  "test-helpers",
+] }
+tempfile = "3"
+chrono = { version = "0.4", default-features = true }
+diesel = { version = "2.3.5", features = ["sqlite"] }
+mockall = "0.13"
+syn = { version = "2", features = ["full", "visit"] }
+wiremock = "0.6"
+
+[lints]
+workspace = true

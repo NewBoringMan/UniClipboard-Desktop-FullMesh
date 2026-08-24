@@ -1,0 +1,165 @@
+[package]
+name = "uc-platform"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+description = "Platform-specific implementations for UniClipboard (clipboard, security, storage)"
+
+[features]
+test-helpers = []
+# 启用后，未设置 `UC_PROFILE` 时默认使用 "dev" profile：
+# - app_dirs 数据目录后缀变为 `-dev`
+# - 系统钥匙串 service name 后缀变为 `-dev`
+# 仅供 `bun tauri:build:dev` / 本地 dev 构建链路使用，不影响 release 默认行为。
+dev-profile = []
+
+[dependencies]
+# Workspace crates
+# Directory-layout authority: the single source of truth for app data/cache
+# directory resolution (profile suffix, portable redirect). uc-platform stays
+# the AppDirsPort impl and delegates the raw computation here (ADR-008 P5-0c).
+uc-app-paths = { path = "../uc-app-paths" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+tokio-util = { version = "0.7", features = ["io", "io-util", "compat"] }
+futures = "0.3"
+
+# Error handling
+anyhow = "1.0"
+
+# Logging
+log = "0.4"
+tracing = "0.1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Encryption
+sha2 = "0.10"
+base64 = "0.22"
+subtle = "2.5"
+
+# Image handling
+image = "0.25"
+
+# UUID
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+
+# Random number generation
+rand = "0.9"
+
+# Byte handling
+bytes = "1.7"
+
+# Hashing
+blake3 = "1.8.2"
+
+# Platform-specific
+libc = "0.2"
+
+# URL handling
+url = "2"
+
+# Utilities
+once_cell = "1.19"
+keyring = { version = "3.6.3", features = [
+  "apple-native",
+  "windows-native",
+  "linux-native-sync-persistent",
+  # crypto-rust: secret-service OpenSession 走 DH (algorithm=dh-ietf1024-sha256-aes128-cbc-pkcs7)
+  # 而非 plain。Fedora 44 gnome-keyring 50.0-1 在 plain_negotiate 路径有崩溃 bug
+  # (service_method_open_session 构造 GVariant 时遇 NULL → glib abort),DH 路径绕开。
+  "crypto-rust",
+] }
+thiserror = "2.0.17"
+
+[dev-dependencies]
+tempfile = "3"
+mockall = "0.13"
+tracing-subscriber = { version = "0.3", features = ["registry", "fmt", "env-filter"] }
+
+# Linux 上 keyring → dbus-secret-service → dbus → libdbus-sys。默认 libdbus-sys
+# 走 pkg-config 找系统 libdbus-1-dev,musl 静态交叉编译没有 sysroot 走不通
+# (见 ace8685f 启用 musl 后 CI 报的 "pkg-config has not been configured to
+# support cross-compilation")。这里只在 musl target 上对 libdbus-sys 启用
+# vendored,build.rs 改走 cc-rs 编 dbus 1.14.4 的源码 (crate 内置 vendor/dbus/),
+# 配合容器里已有的 CC_x86_64_unknown_linux_musl=musl-gcc 直接静态链 libdbus.a
+# 进二进制。Cargo feature unification 保证 dbus-secret-service 用的也是同一个
+# 开了 vendored 的 libdbus-sys 实例。
+#
+# 用 target_env="musl" 收口的原因:linux-gnu (本地 dev / 桌面端 CI) 仍走系统
+# libdbus,避免每个本地 Linux 构建都重新编一份 dbus 1.14.4 source。
+#
+# 注意:静态链只解决构建期的依赖,运行期仍需要目标机器有 dbus 会话总线 +
+# secret-service backend (gnome-keyring/kwallet),否则 keyring 调用会在
+# 运行期失败 (Alpine / 极简 distro 是这个状态)。
+[target.'cfg(all(target_os = "linux", target_env = "musl"))'.dependencies]
+libdbus-sys = { version = "0.2", features = ["vendored"] }
+
+# Linux-only dependencies for the platform clipboard backend:
+#
+# * rustix — eventfd-backed shutdown channel for the platform clipboard event
+#   loop (`crates/uc-platform/src/clipboard/event_loop.rs`) + poll/pipe
+#   primitives consumed by the Wayland data-control implementations under
+#   `clipboard/platform/linux/wayland/`. rustix's `event::eventfd` is gated
+#   to linux_kernel / freebsd / illumos / espidf upstream, so we cannot use
+#   `cfg(unix)` here — macOS would fail to find `EventfdFlags`. macOS /
+#   Windows / other Unix use the Condvar-only path in `event_loop.rs`.
+#
+# * wayland-client / wayland-protocols(-wlr) — native Wayland data-control
+#   client for the platform clipboard backend. Phase 2 added it; Phase 5
+#   added the `ext-data-control` variant (gated behind the `staging` feature
+#   of `wayland-protocols`).
+#
+# * x11rb — native X11 selection client (Phase 3). Replaces the
+#   `clipboard_rs` X11 path with our own ICCCM/XFIXES implementation; the
+#   `xfixes` feature is required for `xfixes::select_selection_input`
+#   change notifications.
+#
+#   `clipboard-rs` is the legacy/transitional implementation that Phase 1
+#   wraps via `clipboard_rs_adapter`. Phase 4 narrows it to
+#   `cfg(any(target_os="macos", target_os="windows"))`.
+#   Pinning notes:
+#     * wayland-client 0.31.x is the current stable line; wayland-rs follows
+#       semver so 0.31 → 0.32 will require a porting pass.
+#     * wayland-protocols-wlr 0.3.x exposes `zwlr_data_control_v1` (used by
+#       niri / sway / hyprland / KDE Plasma).
+#     * wayland-protocols 0.32 with `staging` feature exposes
+#       `ext_data_control_v1` (used by GNOME mutter 47+).
+#     * x11rb 0.13.x is the current stable line; the `xfixes` feature is
+#       what the watcher needs for selection-change notifications.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "0.38", features = ["event", "fs", "pipe"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+x11rb = { version = "0.13", features = ["xfixes"] }
+
+# `clipboard-rs` is now Linux-free (Phase 4): native Wayland + native x11rb
+# cover every Linux session we support. Keep it on macOS/Windows where the
+# native backends still wrap it. The `LinuxClipboard` / `X11Clipboard` /
+# `WaylandClipboard` impls in `clipboard/platform/linux/` do not pull this in.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+clipboard-rs = { version = "0.3.3", features = ["default"] }
+
+[target.'cfg(windows)'.dependencies]
+clipboard-win = { version = "5.4" }
+
+# macOS 平台原子多 rep 写入（见 `clipboard/platform/macos.rs::write_snapshot_multi_macos`）。
+# 显式启用 NSPasteboard + NSPasteboardItem feature，以拿到 NSPasteboardTypeString /
+# NSPasteboardTypeHTML 常量与 setData_forType / writeObjects API。
+# objc2-foundation 的 features 虽然被 NSPasteboard feature transitively 启用，
+# 但这里显式列出以便阅读；避免未来 objc2-app-kit 的 feature 传递规则变更后静默失效。
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSString"] }
+
+[lints]
+workspace = true

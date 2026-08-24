@@ -1,0 +1,688 @@
+//! HTTP route handlers for the daemon API.
+//!
+//! Router is split into two tiers:
+//! - L1 (router_l1): public endpoints requiring no authentication (health check)
+//! - L2+ (router_l2_plus): protected endpoints behind auth_extractor + rate_limit middleware
+//!
+//! Middleware request order:
+//!   cors_middleware runs FIRST and wraps all responses
+//!   auth_extractor runs SECOND -> validates JWT + PID whitelist -> sets client_id
+//!   rate_limit runs THIRD -> checks rate limit using client_id from extensions
+//!
+//! L3/L4 permission enforcement is NOT implemented in Phase 75 (deferred to future phases).
+
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::middleware;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use uc_daemon_contract::api::dto::clipboard_command::{
+    CaptureCurrentClipboardResponse, RestoreEntryResponse,
+};
+use uc_daemon_contract::api::dto::envelope::{
+    ApiEnvelope, CaptureCurrentClipboardEnvelope, HealthEnvelope, NetworkRecoveryStatusEnvelope,
+    PeerSnapshotListEnvelope, PresenceRefreshEnvelope, RestoreEntryEnvelope,
+    SpaceMemberListEnvelope, StatusEnvelope,
+};
+use uc_daemon_contract::api::dto::error::ApiErrorResponse;
+use uc_daemon_contract::constants::http_route;
+use uc_engine::error_codes::{
+    CAPTURE_CURRENT_CLIPBOARD_FAILED_CODE, RESTORE_CLIPBOARD_FAILED_CODE,
+    RESTORE_CLIPBOARD_NOT_FOUND_CODE, RESTORE_CLIPBOARD_UNAVAILABLE_CODE,
+};
+use uc_engine::{
+    ClipboardRestoreMode, ClipboardRestoreOutcome, EngineError, Operation, OperationResult,
+    RestoreClipboardInput,
+};
+
+use crate::api::dto::error::{log_facade_failure, ApiError};
+use crate::api::server::DaemonApiState;
+use crate::security::middleware::{auth_extractor_middleware, rate_limit_middleware};
+
+/// Build the L1 (public) router - no auth required.
+/// Contains only the health check endpoint.
+///
+/// Takes state to return Router<DaemonApiState> so it can be merged
+/// with router_l2_plus without type mismatch.
+pub fn router_l1(state: DaemonApiState) -> Router<DaemonApiState> {
+    let mut router = Router::new()
+        .route("/health", get(health))
+        .with_state(state.clone());
+
+    #[cfg(debug_assertions)]
+    {
+        router = router.merge(crate::api::dev::router(state));
+    }
+
+    // NOTE: cors_middleware is applied once at the outermost layer in
+    // `build_router` so it wraps all merged sub-routers. Do not re-layer it
+    // here or each request will traverse CORS twice.
+    router
+}
+
+/// Build the L2+ (protected) router - requires valid session token.
+/// All routes are behind auth_extractor -> rate_limit middleware layers.
+/// CORS wrapping is applied once at the outermost level in `build_router`.
+///
+/// LAYER ORDER (FINDING-2): In Axum, the LAST `.layer()` call runs FIRST on
+/// incoming requests and sees responses returned by inner layers. We want:
+/// - auth_extractor to run before rate_limit
+/// - rate_limit to run after auth_extractor has populated client_id
+/// - CORS (applied outside this function) to wrap the whole chain so
+///   auth/rate-limit rejections still include CORS headers
+///
+/// Therefore the order inside this function must be:
+///   .layer(rate_limit_middleware)      // innermost -> runs THIRD
+///   .layer(auth_extractor_middleware)  // outer of these two -> runs SECOND
+///
+/// The outer cors_middleware in `build_router` then runs FIRST on the merged
+/// router, before either of these layers executes.
+///
+/// This means rate limiting applies to already-authenticated requests (by validated PID).
+/// It is NOT a pre-auth gate - that is a deliberate design choice for Phase 75.
+///
+/// NOTE on L3/L4: Phase 75 does NOT implement L3/L4 permission enforcement.
+/// The middleware chain enforces only L2 (valid JWT + PID whitelist).
+/// L3/L4 checks (encryption_ready state) are reserved for future phases.
+pub fn router_l2_plus(state: DaemonApiState) -> Router<DaemonApiState> {
+    let router = Router::new()
+        .merge(crate::api::clipboard::router())
+        .merge(crate::api::search::router())
+        .merge(crate::api::device::router())
+        .merge(crate::api::member::router())
+        .merge(crate::api::mobile_sync::router())
+        .merge(crate::api::settings::router())
+        .merge(crate::api::diagnostics::router())
+        .merge(crate::api::v2::router())
+        .merge(crate::api::encryption::router())
+        .merge(crate::api::storage::router())
+        .merge(crate::api::config::router())
+        .merge(crate::api::pairing::router())
+        .merge(crate::api::blob::router())
+        .merge(crate::api::upgrade::router())
+        .merge(crate::api::analytics::router())
+        .route("/status", get(status))
+        .route("/peers", get(peers))
+        .route("/paired-devices", get(paired_devices))
+        .route("/presence/refresh", post(refresh_presence))
+        .route(
+            http_route::NETWORK_RECOVERY,
+            get(network_recovery_status).post(recover_network),
+        )
+        .merge(crate::api::lifecycle::router())
+        .route(
+            &format!("{}/:entry_id", http_route::CLIPBOARD_RESTORE),
+            post(restore_clipboard_entry_handler),
+        )
+        .route(
+            http_route::CLIPBOARD_CAPTURE_CURRENT,
+            post(capture_current_clipboard_handler),
+        )
+        .with_state(state.clone());
+
+    // Apply middleware layers.
+    // NOTE: cors_middleware is NOT applied here; it is layered once at the
+    // outermost level in `build_router` so it wraps every sub-router exactly
+    // once. Browser clients still receive ACAO headers on auth/rate-limit
+    // rejections because the outer cors layer wraps this entire chain.
+    // auth_extractor runs before rate_limit and sets client_id in extensions.
+    let state_for_middleware = Arc::new(state);
+    router
+        .layer(middleware::from_fn_with_state(
+            state_for_middleware.clone(),
+            rate_limit_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            state_for_middleware,
+            auth_extractor_middleware,
+        ))
+}
+
+/// GET /health
+///
+/// Public (L1) liveness probe. Returns the daemon status string plus version
+/// metadata wrapped in the canonical `{ data, ts }` envelope (ADR-008 §0.2).
+/// The previous bare `{ status, ... }` shape is retired.
+#[utoipa::path(
+    get,
+    path = "/health",
+    operation_id = "getHealth",
+    tag = "system",
+    responses(
+        (status = 200, description = "Daemon is alive", body = HealthEnvelope)
+    ),
+    security(())
+)]
+async fn health(State(state): State<DaemonApiState>) -> Json<HealthEnvelope> {
+    Json(ApiEnvelope::now(state.health_response().await))
+}
+
+/// Restore endpoint 的可选 query 参数。
+///
+/// `plain=true` 时走「以纯文本形式恢复」路径——只把 `text/plain` 表示写入
+/// 系统剪贴板，让目标应用别无选择地粘出纯文本（Markdown 源码 / HTML 标签 /
+/// RTF 等富文本被剔除）。条目若没有 plain 表示，facade 静默降级为多格式恢复。
+///
+/// `plain=false` 或缺省时与历史行为完全一致：多格式恢复。
+///
+/// `file_paths=true` converts a file entry's URI list to newline-separated
+/// native paths and writes those paths as plain text.
+#[derive(Debug, Default, serde::Deserialize)]
+struct RestoreQuery {
+    #[serde(default)]
+    plain: bool,
+    #[serde(default)]
+    file_paths: bool,
+}
+
+/// POST /clipboard/restore/{entry_id}
+///
+/// Re-apply a stored clipboard entry to the local system clipboard. Wrapped in
+/// the canonical `{ data, ts }` envelope (ADR-008 §0.1/§0.2); errors use the
+/// canonical `ApiErrorResponse`. The `payload_unavailable` (410) error carries
+/// `{ entry_id, rep_id, state }` in `details` (§0.3); the `code`/`message`
+/// strings are LOAD-BEARING and preserved.
+#[utoipa::path(
+    post,
+    path = "/clipboard/restore/{entry_id}",
+    operation_id = "restoreClipboardEntry",
+    tag = "clipboard",
+    params(
+        ("entry_id" = String, Path, description = "Clipboard entry id to restore"),
+        ("plain" = Option<bool>, Query, description = "Restore as plain text only (strip rich representations)"),
+        ("file_paths" = Option<bool>, Query, description = "Restore file entries as newline-separated native paths")
+    ),
+    responses(
+        (status = 200, description = "Entry restored to the system clipboard", body = RestoreEntryEnvelope),
+        (status = 400, description = "Requested transform not applicable to this entry (e.g. file-path restore with no file paths)", body = ApiErrorResponse),
+        (status = 404, description = "Entry not found", body = ApiErrorResponse),
+        (status = 410, description = "Entry payload is no longer available (orphaned/lost)", body = ApiErrorResponse),
+        (status = 500, description = "Internal server error", body = ApiErrorResponse)
+    )
+)]
+async fn restore_clipboard_entry_handler(
+    State(state): State<DaemonApiState>,
+    Path(entry_id): Path<String>,
+    Query(query): Query<RestoreQuery>,
+) -> impl IntoResponse {
+    tracing::info!(
+        entry_id = %entry_id,
+        plain = query.plain,
+        file_paths = query.file_paths,
+        "daemon restore request received"
+    );
+
+    let op: &'static str = if query.file_paths {
+        "restore_entry_as_file_paths"
+    } else if query.plain {
+        "restore_entry_as_plain_text"
+    } else {
+        "restore_entry"
+    };
+    let mode = if query.file_paths {
+        ClipboardRestoreMode::FilePaths
+    } else if query.plain {
+        ClipboardRestoreMode::PlainText
+    } else {
+        ClipboardRestoreMode::Standard
+    };
+
+    match state
+        .execute(Operation::RestoreClipboard(RestoreClipboardInput {
+            entry_id: entry_id.clone(),
+            mode,
+        }))
+        .await
+    {
+        Ok(OperationResult::ClipboardRestored(ClipboardRestoreOutcome::Restored)) => {
+            tracing::info!(
+                entry_id = %entry_id,
+                plain = query.plain,
+                "daemon restore request succeeded"
+            );
+            let (status, body) = restore_success_response();
+            (status, body).into_response()
+        }
+        Ok(OperationResult::ClipboardRestored(ClipboardRestoreOutcome::PayloadUnavailable {
+            entry_id,
+            representation_id,
+            state,
+        })) => {
+            let (status, body) =
+                restore_payload_unavailable_response(entry_id, representation_id, state);
+            (status, body).into_response()
+        }
+        Ok(OperationResult::ClipboardRestored(ClipboardRestoreOutcome::NotApplicable {
+            reason,
+        })) => {
+            let (status, body) = restore_not_applicable_response(&entry_id, reason);
+            (status, body).into_response()
+        }
+        Ok(_) => ApiError::internal("engine returned an unexpected restore result").into_response(),
+        Err(error) => {
+            let (status, body) = restore_engine_error_to_response(op, error, &entry_id);
+            (status, body).into_response()
+        }
+    }
+}
+
+/// Build the canonical 200 success body for a restore.
+///
+/// Free function so the status-code contract is unit-testable without
+/// spinning up an axum app or `DaemonApiState`. The handler above is a thin
+/// wrapper around this.
+fn restore_success_response() -> (StatusCode, Json<RestoreEntryEnvelope>) {
+    (
+        StatusCode::OK,
+        Json(ApiEnvelope::now(RestoreEntryResponse { success: true })),
+    )
+}
+
+fn restore_payload_unavailable_response(
+    entry_id: String,
+    representation_id: String,
+    state: String,
+) -> (StatusCode, Json<ApiErrorResponse>) {
+    tracing::info!(
+        entry_id = %entry_id,
+        rep_id = %representation_id,
+        payload_state = %state,
+        "daemon restore: payload unavailable (orphaned/lost)"
+    );
+    (
+        StatusCode::GONE,
+        Json(ApiErrorResponse::with_details(
+            "payload_unavailable",
+            "clipboard entry payload is no longer available",
+            serde_json::json!({
+                "entry_id": entry_id,
+                "rep_id": representation_id,
+                "state": state,
+            }),
+        )),
+    )
+}
+
+fn restore_not_applicable_response(
+    entry_id: &str,
+    reason: String,
+) -> (StatusCode, Json<ApiErrorResponse>) {
+    tracing::info!(
+        entry_id = %entry_id,
+        reason = %reason,
+        "daemon restore: transform not applicable to entry"
+    );
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ApiErrorResponse::new("not_applicable", &reason)),
+    )
+}
+
+fn restore_engine_error_to_response(
+    op: &'static str,
+    error: EngineError,
+    entry_id: &str,
+) -> (StatusCode, Json<ApiErrorResponse>) {
+    if error.code() == RESTORE_CLIPBOARD_NOT_FOUND_CODE {
+        tracing::info!(entry_id = %entry_id, "daemon restore: entry not found");
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ApiErrorResponse::new(
+                "not_found",
+                "clipboard entry not found",
+            )),
+        );
+    }
+
+    let variant = match error.code() {
+        RESTORE_CLIPBOARD_UNAVAILABLE_CODE => "unavailable",
+        RESTORE_CLIPBOARD_FAILED_CODE => "internal",
+        _ => "unexpected_engine_error",
+    };
+    log_facade_failure(
+        "clipboard_restore",
+        op,
+        variant,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "clipboard restore failed",
+    );
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ApiErrorResponse::new("internal_error", "internal error")),
+    )
+}
+
+/// POST /clipboard/capture-current
+///
+/// Capture whatever is on the OS clipboard right now into history,
+/// without waiting for a change event (issue #1169: lets a caller preserve
+/// a concurrent write — e.g. something copied during the daemon's startup
+/// window — before overwriting the OS clipboard with a restored entry).
+/// Wrapped in the canonical `{ data, ts }` envelope (ADR-008 §0.1/§0.2).
+/// `entryId: null` means there was nothing on the OS clipboard to capture;
+/// this is not an error.
+#[utoipa::path(
+    post,
+    path = "/clipboard/capture-current",
+    operation_id = "captureCurrentClipboard",
+    tag = "clipboard",
+    responses(
+        (status = 200, description = "Current OS clipboard content captured (or nothing to capture)", body = CaptureCurrentClipboardEnvelope),
+        (status = 500, description = "Internal server error", body = ApiErrorResponse),
+    )
+)]
+async fn capture_current_clipboard_handler(
+    State(state): State<DaemonApiState>,
+) -> impl IntoResponse {
+    match state.execute(Operation::CaptureCurrentClipboard).await {
+        Ok(OperationResult::ClipboardCaptured { entry_id }) => {
+            tracing::info!(entry_id = ?entry_id, "daemon capture-current request succeeded");
+            let (status, body) = capture_current_success_response(entry_id);
+            (status, body).into_response()
+        }
+        Ok(_) => ApiError::internal("engine returned an unexpected capture result").into_response(),
+        Err(error) => map_capture_engine_error(error).into_response(),
+    }
+}
+
+fn map_capture_engine_error(error: EngineError) -> ApiError {
+    let variant = match error.code() {
+        CAPTURE_CURRENT_CLIPBOARD_FAILED_CODE => "internal",
+        _ => "unexpected_engine_error",
+    };
+    let api = ApiError::internal("failed to capture current clipboard");
+    log_facade_failure(
+        "clipboard_capture",
+        "capture_current",
+        variant,
+        api.status,
+        &api.message,
+    );
+    api
+}
+
+/// Build the canonical 200 success body for a capture-current request.
+///
+/// Free function so the status-code contract is unit-testable without
+/// spinning up an axum app or `DaemonApiState`, mirroring
+/// [`restore_success_response`].
+fn capture_current_success_response(
+    entry_id: Option<String>,
+) -> (StatusCode, Json<CaptureCurrentClipboardEnvelope>) {
+    (
+        StatusCode::OK,
+        Json(ApiEnvelope::now(CaptureCurrentClipboardResponse {
+            entry_id,
+        })),
+    )
+}
+
+/// GET /status
+///
+/// Diagnostic snapshot: version metadata, uptime, and worker health. Wrapped
+/// in the canonical `{ data, ts }` envelope (ADR-008 §0.2); the previous bare
+/// object shape is retired.
+#[utoipa::path(
+    get,
+    path = "/status",
+    operation_id = "getStatus",
+    tag = "system",
+    responses(
+        (status = 200, description = "Daemon status snapshot", body = StatusEnvelope)
+    )
+)]
+async fn status(State(state): State<DaemonApiState>) -> Json<StatusEnvelope> {
+    Json(ApiEnvelope::now(state.status_response()))
+}
+
+/// GET /peers
+///
+/// List discovered peer snapshots (topology view). Wrapped in the canonical
+/// `{ data, ts }` envelope (ADR-008 §0.2); the previous bare top-level array
+/// is retired.
+#[utoipa::path(
+    get,
+    path = "/peers",
+    operation_id = "listPeers",
+    tag = "system",
+    responses(
+        (status = 200, description = "Peer snapshot list", body = PeerSnapshotListEnvelope),
+        (status = 500, description = "Internal server error", body = ApiErrorResponse)
+    )
+)]
+async fn peers(
+    State(state): State<DaemonApiState>,
+) -> Result<Json<PeerSnapshotListEnvelope>, ApiError> {
+    let response = state
+        .peer_snapshots()
+        .await
+        .map_err(|error| diagnostics_internal_error("peers", error))?;
+    Ok(Json(ApiEnvelope::now(response)))
+}
+
+/// GET /paired-devices
+///
+/// List paired space members with presence. Wrapped in the canonical
+/// `{ data, ts }` envelope (ADR-008 §0.2); the previous bare top-level array
+/// is retired.
+#[utoipa::path(
+    get,
+    path = "/paired-devices",
+    operation_id = "listPairedDevices",
+    tag = "system",
+    responses(
+        (status = 200, description = "Paired space-member list", body = SpaceMemberListEnvelope),
+        (status = 500, description = "Internal server error", body = ApiErrorResponse)
+    )
+)]
+async fn paired_devices(
+    State(state): State<DaemonApiState>,
+) -> Result<Json<SpaceMemberListEnvelope>, ApiError> {
+    let response = state
+        .paired_devices()
+        .await
+        .map_err(|error| diagnostics_internal_error("paired_devices", error))?;
+    Ok(Json(ApiEnvelope::now(response)))
+}
+
+/// POST /presence/refresh
+///
+/// Actively probe paired peers' reachability and return the round's counters.
+/// Wrapped in the canonical `{ data, ts }` envelope (ADR-008 §0.2); the
+/// previous bare object (counters at top level) is retired.
+#[utoipa::path(
+    post,
+    path = "/presence/refresh",
+    operation_id = "refreshPresence",
+    tag = "system",
+    responses(
+        (status = 200, description = "Presence refresh round completed", body = PresenceRefreshEnvelope),
+        (status = 500, description = "Internal server error", body = ApiErrorResponse)
+    )
+)]
+async fn refresh_presence(
+    State(state): State<DaemonApiState>,
+) -> Result<Json<PresenceRefreshEnvelope>, ApiError> {
+    let response = state
+        .refresh_presence()
+        .await
+        .map_err(|error| diagnostics_internal_error("refresh_presence", error))?;
+    Ok(Json(ApiEnvelope::now(response)))
+}
+
+/// GET /network/recovery
+#[utoipa::path(
+    get,
+    path = "/network/recovery",
+    operation_id = "getNetworkRecoveryStatus",
+    tag = "system",
+    responses(
+        (status = 200, description = "Current network recovery state", body = NetworkRecoveryStatusEnvelope),
+        (status = 503, description = "Network recovery state is unavailable", body = ApiErrorResponse)
+    )
+)]
+async fn network_recovery_status(
+    State(state): State<DaemonApiState>,
+) -> Result<Json<NetworkRecoveryStatusEnvelope>, ApiError> {
+    let response = state
+        .network_recovery_status()
+        .await
+        .map_err(|error| network_recovery_error("network_recovery_status", error))?;
+    Ok(Json(ApiEnvelope::now(response)))
+}
+
+/// POST /network/recovery
+#[utoipa::path(
+    post,
+    path = "/network/recovery",
+    operation_id = "recoverNetwork",
+    tag = "system",
+    responses(
+        (status = 200, description = "Network recovery completed", body = NetworkRecoveryStatusEnvelope),
+        (status = 503, description = "Network recovery could not be started", body = ApiErrorResponse)
+    )
+)]
+async fn recover_network(
+    State(state): State<DaemonApiState>,
+) -> Result<Json<NetworkRecoveryStatusEnvelope>, ApiError> {
+    let response = state
+        .recover_network()
+        .await
+        .map_err(|error| network_recovery_error("recover_network", error))?;
+    Ok(Json(ApiEnvelope::now(response)))
+}
+
+/// Map a diagnostics-handler `anyhow::Error` onto a canonical 500 `ApiError`,
+/// preserving the structured `facade / op` Sentry signal previously emitted by
+/// the legacy `internal_error` helper. Used by the `system` topology handlers
+/// (peers / paired_devices / refresh_presence) now that they return
+/// `ApiErrorResponse` instead of the ad-hoc `{ "error": "internal_error" }`
+/// body.
+fn diagnostics_internal_error(op: &'static str, error: anyhow::Error) -> ApiError {
+    log_facade_failure(
+        "daemon_api",
+        op,
+        "internal",
+        StatusCode::INTERNAL_SERVER_ERROR,
+        &error.to_string(),
+    );
+    ApiError::internal(error.to_string())
+}
+
+fn network_recovery_error(op: &'static str, error: anyhow::Error) -> ApiError {
+    log_facade_failure(
+        "daemon_api",
+        op,
+        "unavailable",
+        StatusCode::SERVICE_UNAVAILABLE,
+        &error.to_string(),
+    );
+    ApiError::service_unavailable("network recovery is unavailable")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_current_result_and_failure_keep_the_existing_http_contract() {
+        let (status, body) = capture_current_success_response(Some("entry-1".into()));
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.0.data.entry_id.as_deref(), Some("entry-1"));
+
+        let error = map_capture_engine_error(EngineError::new(
+            CAPTURE_CURRENT_CLIPBOARD_FAILED_CODE,
+            uc_engine::EngineErrorCategory::Internal,
+            false,
+        ));
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error.message, "failed to capture current clipboard");
+        assert!(error.details.is_none());
+    }
+
+    #[test]
+    fn restore_success_returns_200_with_enveloped_success_true() {
+        let (status, body) = restore_success_response();
+        assert_eq!(status, StatusCode::OK);
+        // Canonical `{ data: { success: true }, ts }` envelope (ADR-008 §0.1).
+        assert!(body.0.data.success);
+    }
+
+    #[test]
+    fn restore_not_found_returns_404_with_not_found_code() {
+        let (status, body) = restore_engine_error_to_response(
+            "restore_entry",
+            EngineError::new(
+                RESTORE_CLIPBOARD_NOT_FOUND_CODE,
+                uc_engine::EngineErrorCategory::NotFound,
+                false,
+            ),
+            "entry-1",
+        );
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        // `code` token is LOAD-BEARING and preserved.
+        assert_eq!(body.0.code, "not_found");
+        assert!(body.0.details.is_none());
+    }
+
+    #[test]
+    fn restore_payload_unavailable_returns_410_with_full_context_in_details() {
+        let (status, body) = restore_payload_unavailable_response(
+            "entry-1".to_string(),
+            "rep-2".to_string(),
+            "Lost".to_string(),
+        );
+        // 410 Gone — known business outcome, never 500
+        assert_eq!(status, StatusCode::GONE);
+        assert_eq!(body.0.code, "payload_unavailable");
+        // The 410 context moves into `details` (ADR-008 §0.3).
+        let details = body.0.details.expect("410 must carry structured details");
+        assert_eq!(details["entry_id"], "entry-1");
+        assert_eq!(details["rep_id"], "rep-2");
+        assert_eq!(details["state"], "Lost");
+    }
+
+    #[test]
+    fn restore_payload_unavailable_with_orphaned_state_uses_state_string_verbatim() {
+        let (status, body) = restore_payload_unavailable_response(
+            "e".to_string(),
+            "r".to_string(),
+            "Staged".to_string(),
+        );
+        assert_eq!(status, StatusCode::GONE);
+        let details = body.0.details.expect("410 must carry structured details");
+        assert_eq!(details["state"], "Staged");
+    }
+
+    #[test]
+    fn restore_not_applicable_returns_400_with_reason() {
+        let (status, body) = restore_not_applicable_response(
+            "entry-4",
+            "entry has no restorable file paths".to_string(),
+        );
+        // Client request problem (transform doesn't apply) — 400, never 500.
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body.0.code, "not_applicable");
+        assert_eq!(body.0.message, "entry has no restorable file paths");
+    }
+
+    #[test]
+    fn restore_internal_returns_500_with_generic_body() {
+        let (status, body) = restore_engine_error_to_response(
+            "restore_entry",
+            EngineError::new(
+                RESTORE_CLIPBOARD_FAILED_CODE,
+                uc_engine::EngineErrorCategory::Internal,
+                false,
+            ),
+            "entry-3",
+        );
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        // 内部错误细节不能泄漏到响应 body — only the generic code/message.
+        assert_eq!(body.0.code, "internal_error");
+        assert_eq!(body.0.message, "internal error");
+    }
+}

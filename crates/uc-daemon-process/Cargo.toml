@@ -1,0 +1,65 @@
+[package]
+name = "uc-daemon-process"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+description = "Thin daemon process-management primitives (PID file, socket path, detached spawn, spawn contract) with no app-stack or iroh/diesel dependencies"
+
+[features]
+test-helpers = []
+
+[lib]
+name = "uc_daemon_process"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1.0"
+thiserror = "2.0"
+# contract.rs re-exports `ProbeOutcome` from uc-daemon-contract and
+# health_wait.rs references `DaemonBootstrapError`. The contract crate is a
+# pure-serde leaf — it does NOT pull iroh/diesel, preserving this crate's thin
+# invariant (ADR-008 P5-0).
+uc-daemon-contract = { path = "../uc-daemon-contract" }
+# health_wait.rs uses `tokio::time::{Instant, sleep}` for async deadline
+# polling. Only the `time` feature is required at runtime; test utilities
+# (macros, rt, test-util) are scoped to dev-dependencies below.
+tokio = { version = "1", features = ["time"] }
+# Resolves the application data root
+# (`<data_local_dir>/app.uniclipboard.desktop`) for the daemon PID/token paths
+# without dragging in the app stack (uc-application/uc-platform). The directory-
+# layout authority is the single source uc-platform also consumes, so the
+# resolved paths stay byte-identical (ADR-008 P5-0c). `dirs` is pulled in
+# transitively through this crate.
+uc-app-paths = { path = "../uc-app-paths" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Single-instance arbitration compares daemon package versions read from peer
+# PID files (`should_evict_holder`). `semver` is a pure-parse leaf — it pulls
+# nothing heavy, preserving this crate's iroh/diesel-free thin invariant.
+semver = "1"
+# Best-effort warn-level logging in the handover store (corrupt/unclearable
+# record). `tracing` is a leaf facade — it pulls nothing heavy, so the
+# iroh/diesel-free invariant of this thin crate is preserved.
+tracing = "0.1"
+which = "7"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Win32-native process liveness/termination (win_process.rs). Replaces shelling
+# out to `taskkill`/`tasklist`, which (a) flashed a console window per
+# invocation from the GUI-subsystem host — terminate_and_wait polled tasklist
+# every 100ms, so a 10s timeout flashed ~100 black boxes — and (b) required
+# parsing locale-dependent output (the zh-CN no-match banner broke the English
+# "INFO:" check and made every update install abort). windows-sys is pure FFI
+# declarations gated per-module, already in the dependency tree via tokio —
+# the thin-crate invariant (ADR-008 P5-0) is preserved.
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "test-util"] }
+
+[lints]
+workspace = true

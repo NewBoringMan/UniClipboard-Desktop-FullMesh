@@ -1,0 +1,234 @@
+---
+title: Self-host a UniClipboard relay
+description: Deploy the official UniClipboard relay image and connect your devices to it.
+---
+
+UniClipboard can use a relay you operate instead of the default public relays. The recommended
+deployment uses the official `ghcr.io/uniclipboard/relay` image with Docker Compose. Caddy provides
+HTTPS automatically, while the relay stays private inside the container network.
+
+Each device needs the relay URL and the same access token. Changes take effect after UniClipboard
+restarts its background service.
+
+## What a relay does
+
+A relay forwards encrypted traffic when two devices cannot connect directly. It can observe
+connection metadata and the size and timing of encrypted traffic, but it cannot read clipboard
+content, passphrases, the space MasterKey, or the membership list.
+
+Running your own relay gives you control over its location, availability, and bandwidth. It does
+not replace peer discovery: first-time pairing still uses UniClipboard's rendezvous service.
+
+See
+[Pairing & sync - What the relay sees vs. what your peers see](./pairing#what-the-relay-sees-vs-what-your-peers-see)
+for the complete threat model.
+
+## Prerequisites
+
+- A public Linux server with Docker Engine and Docker Compose v2
+- A domain such as `relay.example.com` whose DNS records point to the server
+- Inbound TCP ports `80` and `443` open in both the host firewall and the cloud firewall
+- OpenSSL, used once to generate the access token
+
+If the domain has an `AAAA` record, the server must also be reachable over IPv6. Remove stale DNS
+records before continuing.
+
+<Callout type="warn">
+  The `.env` file created below contains the relay access token. Keep its permissions at `0600`, do
+  not commit it, and do not share it. Anyone with this token can use your relay.
+</Callout>
+
+## Deploy
+
+### 1. Create the deployment directory and token
+
+Replace `relay.example.com` with your relay domain, then run:
+
+```bash
+mkdir -p uniclipboard-relay
+cd uniclipboard-relay
+umask 077
+printf 'RELAY_DOMAIN=relay.example.com\nUC_RELAY_TOKEN=%s\n' \
+  "$(openssl rand -hex 32)" > .env
+chmod 600 .env
+```
+
+### 2. Create `docker-compose.yml`
+
+```yaml
+services:
+  relay:
+    image: ${RELAY_IMAGE:-ghcr.io/uniclipboard/relay:latest}
+    restart: unless-stopped
+    environment:
+      UC_RELAY_TOKEN: ${UC_RELAY_TOKEN:?set UC_RELAY_TOKEN in .env}
+    expose:
+      - '3340'
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      relay:
+        condition: service_healthy
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?set RELAY_DOMAIN in .env}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:
+```
+
+The relay's port `3340` is only visible to other containers in this Compose project. Only Caddy's
+HTTP and HTTPS ports are exposed publicly.
+
+### 3. Create `Caddyfile`
+
+```text
+{$RELAY_DOMAIN} {
+  reverse_proxy relay:3340
+}
+```
+
+Caddy obtains and renews the certificate automatically. This configuration also supports relay
+WebSocket connections and preserves the `Authorization` header.
+
+### 4. Start the services
+
+```bash
+docker compose config
+docker compose pull
+docker compose up -d
+```
+
+The first start can take a short time while Caddy obtains the certificate.
+
+### 5. Verify the deployment
+
+```bash
+docker compose ps
+curl --fail --show-error https://relay.example.com/healthz
+docker compose logs -f relay
+```
+
+Replace the domain in the `curl` command. The health endpoint should return a JSON response with
+`"status":"ok"`, and the relay service should show as healthy in `docker compose ps`.
+
+Press `Ctrl+C` to stop following the logs; the containers keep running.
+
+## Connect UniClipboard
+
+Repeat these steps on every device:
+
+1. Open **Settings -> Network -> Custom relay nodes**.
+2. Add the relay URL, for example `https://relay.example.com`. Do not add a port or path.
+3. Open `.env` on the server and copy the value after `UC_RELAY_TOKEN=` into the access token field.
+4. Click **Test availability**.
+5. Click **Save relay node**, then **Restart now** when prompted.
+
+UniClipboard does not display a saved token again. To replace it, enter the new token explicitly
+and save the relay again.
+
+<Callout type="info">
+  Custom relays are not synced between devices. Configure the URL and token separately on every
+  device. Remove all custom relay entries to return to the default public relays.
+</Callout>
+
+## Update or pin the image
+
+The `latest` tag is not updated on a running server until you pull it:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+For a reproducible deployment, set `RELAY_IMAGE` in `.env` to an available version tag or image
+digest from the
+[UniClipboard relay package page](https://github.com/UniClipboard/relay/pkgs/container/relay):
+
+```dotenv
+RELAY_IMAGE=ghcr.io/uniclipboard/relay@sha256:YOUR_IMAGE_DIGEST
+```
+
+Then run `docker compose pull` and `docker compose up -d` again.
+
+## Use an existing reverse proxy
+
+You can reuse nginx, Caddy, Traefik, or another HTTPS reverse proxy instead of the Caddy service
+above. The proxy must:
+
+- Terminate HTTPS with a publicly trusted certificate
+- Support WebSocket upgrades
+- Preserve the `Authorization` request header
+- Forward requests to the relay's port `3340`
+
+If the proxy runs directly on the host, replace `expose` on the relay service with a loopback-only
+port mapping:
+
+```yaml
+ports:
+  - '127.0.0.1:3340:3340'
+```
+
+Then proxy to `http://127.0.0.1:3340`. Do not publish `3340` on all network interfaces.
+
+Browser clients put their token in a `token` query parameter because WebSocket requests cannot set
+a custom authorization header. Caddy access logs are disabled by default in the provided
+configuration. If you enable access logging in any proxy, remove or redact the `token` parameter.
+
+## Direct-connect the relay if you also run a local proxy
+
+A local proxy such as Clash, Mihomo, Surge, or sing-box can add an unnecessary network hop and cap
+relay throughput. First check whether the relay is reachable directly:
+
+```bash
+curl --noproxy '*' --fail --show-error \
+  https://relay.example.com/healthz
+```
+
+If this succeeds, add the relay domain to the direct-connect rules. For Clash or Mihomo:
+
+```yaml
+rules:
+  - DOMAIN-SUFFIX,relay.example.com,DIRECT
+  # ... your existing rules
+```
+
+Only bypass the proxy when the relay is directly reachable from that network.
+
+## Confirm traffic uses your relay
+
+Use all three checks together:
+
+- **Availability test:** the URL and token pass **Test availability** in UniClipboard.
+- **Server logs:** run `docker compose logs -f relay` while the devices connect and sync.
+- **End-to-end test:** sync between two paired devices on networks where a direct connection is
+  unavailable, and confirm relay activity appears at the same time.
+
+## Troubleshooting
+
+| Symptom                                             | What to check                                                                                                             |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Caddy cannot obtain a certificate                   | Confirm DNS points to this server and TCP ports `80` and `443` are publicly reachable. Check `docker compose logs caddy`. |
+| Relay is unhealthy or keeps restarting              | Confirm `.env` contains a non-empty `UC_RELAY_TOKEN`, then check `docker compose logs relay`.                             |
+| Availability test reports an authentication error   | Copy the exact token from `.env` to UniClipboard. If the server token changed, update every device.                       |
+| `/healthz` works locally but not through the domain | Check the reverse proxy target, HTTPS certificate, firewall, and DNS records.                                             |
+| An existing proxy rejects relay connections         | Confirm it supports WebSocket upgrades and preserves the `Authorization` header.                                          |
+| UniClipboard keeps using default relays             | Save the custom relay and choose **Restart now**. The change is not active before restart.                                |
+| Pulling `latest` appears to do nothing              | Run both `docker compose pull` and `docker compose up -d`, then inspect `docker compose ps`.                              |
+| Relay latency is high                               | Choose a server region with good direct routes to all participating devices.                                              |
+
+## More references
+
+- [UniClipboard relay source and deployment notes](https://github.com/UniClipboard/relay)
+- [UniClipboard relay container package](https://github.com/UniClipboard/relay/pkgs/container/relay)
+- [iroh relay concepts](https://docs.iroh.computer/concepts/relays)

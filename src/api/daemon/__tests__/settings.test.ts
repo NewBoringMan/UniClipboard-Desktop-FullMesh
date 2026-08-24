@@ -1,0 +1,334 @@
+/**
+ * settings API 客户端测试 — 覆盖 toSettingsPatchRequest 的 network 段镜像
+ * 与 updateSettings 解析 restartRequired 信号。
+ *
+ * Phase 95 Plan 01 — 类型契约层 RED gate。
+ * - 测试 toSettingsPatchRequest 在 network 段存在/不存在两种情况下的镜像行为
+ * - 测试 updateSettings 返回 { success, restartRequired } 形态
+ * - 反向命名审计 (Pitfall 1 fence) — 确保反向布尔镜像字段不出现，反向取反不被悄悄引入
+ */
+
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import {
+  getRelayCredentialStatus,
+  probeRelayUrl,
+  saveRelay,
+  updateSettings,
+  type Settings,
+} from '@/api/daemon/settings'
+import {
+  getRelayCredentialStatus as getRelayCredentialStatusSdk,
+  probeRelayUrl as probeRelayUrlSdk,
+  saveRelay as saveRelaySdk,
+  updateSettings as updateSettingsSdk,
+} from '@/api/generated/sdk.gen'
+import { makeBaseSettings } from '@/test/fixtures/settings'
+
+// ADR-008 P6: settings 走生成的 SDK + daemonClient.callSdk。
+// - `@/api/daemon/client` 的 callSdk 被 mock 成"直接调用 thunk 并解包 { data }"，
+//   忠实复刻真实实现（client.ts callSdk 在快乐路径上就是 `const { data } = await call()`）。
+// - 生成的 SDK fn `updateSettings` 被 mock：updateSettings wrapper 会带 { body }
+//   调它，测试因此能检查 SDK body 并控制返回的 envelope。
+// vi.mock 由 vitest 在 import 之前 hoist，所以下方的 import 拿到的就是 mock 版本。
+vi.mock('@/api/daemon/client', () => ({
+  daemonClient: {
+    // 复刻 callSdk 快乐路径：调用 SDK thunk，解包其 { data }（= ApiEnvelope）。
+    callSdk: vi.fn((call: () => Promise<{ data: unknown }>) => call().then(r => r.data)),
+    // 复刻 callEnveloped 快乐路径：连拆 SDK { data } 与 { data, ts } 信封。
+    callEnveloped: vi.fn((call: () => Promise<{ data: { data: unknown } }>) =>
+      call().then(r => r.data.data)
+    ),
+  },
+}))
+
+vi.mock('@/api/generated/sdk.gen', () => ({
+  getSettings: vi.fn(),
+  getRelayCredentialStatus: vi.fn(),
+  probeRelayUrl: vi.fn(),
+  saveRelay: vi.fn(),
+  updateSettings: vi.fn(),
+}))
+
+// 类型化的 mock 引用，方便 mockResolvedValue / 访问 mock.calls。
+const updateSdkMock = updateSettingsSdk as unknown as ReturnType<typeof vi.fn>
+const getRelayCredentialStatusSdkMock = getRelayCredentialStatusSdk as unknown as ReturnType<
+  typeof vi.fn
+>
+const probeRelayUrlSdkMock = probeRelayUrlSdk as unknown as ReturnType<typeof vi.fn>
+const saveRelaySdkMock = saveRelaySdk as unknown as ReturnType<typeof vi.fn>
+
+beforeEach(() => {
+  updateSdkMock.mockReset()
+  getRelayCredentialStatusSdkMock.mockReset()
+  probeRelayUrlSdkMock.mockReset()
+  saveRelaySdkMock.mockReset()
+})
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
+
+// 默认成功响应 — 各测试可以 mockResolvedValueOnce 覆盖。
+// ADR-008 §0.1: PUT /settings 返回 ApiEnvelope<SettingsUpdateResultDto> =
+// `{ data: { success, restartRequired }, ts }`（success + restartRequired 折进 data）。
+// SDK fn 以 `{ throwOnError: true }` 调用，resolve 到 `{ data: <envelope> }`。
+function mockUpdateOk(restartRequired: boolean) {
+  updateSdkMock.mockResolvedValueOnce({
+    data: {
+      data: { success: true, restartRequired },
+      ts: 0,
+    },
+  })
+}
+
+describe('settings api — toSettingsPatchRequest network mirror', () => {
+  it('Test 1: toSettingsPatchRequest 镜像 network 段（allowRelayFallback=false）', async () => {
+    mockUpdateOk(true)
+    await updateSettings({
+      network: { allowRelayFallback: false },
+    } as Partial<Settings>)
+
+    expect(updateSdkMock).toHaveBeenCalledTimes(1)
+    const [options] = updateSdkMock.mock.calls[0]
+    expect(options.throwOnError).toBe(true)
+    expect(options.body).toMatchObject({
+      network: { allowRelayFallback: false },
+    })
+    // 不应混入其它顶层段 — 仅 network。
+    expect(Object.keys(options.body)).toEqual(['network'])
+  })
+
+  it('Test 2: toSettingsPatchRequest 反向值 — true 进 true 出（不被悄悄取反）', async () => {
+    mockUpdateOk(false)
+    await updateSettings({
+      network: { allowRelayFallback: true },
+    } as Partial<Settings>)
+
+    expect(updateSdkMock).toHaveBeenCalledTimes(1)
+    const [options] = updateSdkMock.mock.calls[0]
+    expect(options.body.network).toEqual({ allowRelayFallback: true })
+  })
+
+  it('Test 2b: toSettingsPatchRequest 镜像 customRelayUrls 列表', async () => {
+    mockUpdateOk(true)
+    await updateSettings({
+      network: { customRelayUrls: ['https://relay.example.com.'] },
+    } as Partial<Settings>)
+
+    expect(updateSdkMock).toHaveBeenCalledTimes(1)
+    const [options] = updateSdkMock.mock.calls[0]
+    expect(options.body.network).toEqual({
+      customRelayUrls: ['https://relay.example.com.'],
+    })
+  })
+
+  it('Test 2c: toSettingsPatchRequest 镜像 sync.syncOnRestore（防 builder 静默丢字段）', async () => {
+    mockUpdateOk(false)
+    await updateSettings({
+      sync: { syncOnRestore: true },
+    } as Partial<Settings>)
+
+    expect(updateSdkMock).toHaveBeenCalledTimes(1)
+    const [options] = updateSdkMock.mock.calls[0]
+    expect(options.body.sync).toMatchObject({ syncOnRestore: true })
+    expect(Object.keys(options.body)).toEqual(['sync'])
+  })
+
+  it('Test 3: toSettingsPatchRequest 无 network 段 — patch 不含 network key', async () => {
+    mockUpdateOk(false)
+    await updateSettings({
+      general: {
+        autoStart: true,
+        startupMode: 'normal',
+        restoreLastEntryOnStartup: false,
+        autoCheckUpdate: true,
+        autoDownloadUpdate: false,
+        theme: 'system',
+        themeColor: null,
+        themeColorLight: null,
+        themeColorDark: null,
+        themeOverridesLight: {},
+        themeOverridesDark: {},
+        language: null,
+        deviceName: null,
+        telemetryEnabled: false,
+        usageAnalyticsEnabled: false,
+        debugMode: false,
+      },
+    } as Partial<Settings>)
+
+    expect(updateSdkMock).toHaveBeenCalledTimes(1)
+    const [options] = updateSdkMock.mock.calls[0]
+    expect(Object.keys(options.body)).toContain('general')
+    expect(options.body.general).toMatchObject({
+      telemetryEnabled: false,
+      usageAnalyticsEnabled: false,
+    })
+    expect(Object.keys(options.body)).not.toContain('network')
+  })
+})
+
+describe('settings api — updateSettings restartRequired signal', () => {
+  it('Test 4: updateSettings 解析 restartRequired=true', async () => {
+    mockUpdateOk(true)
+    const result = await updateSettings({
+      network: { allowRelayFallback: false },
+    } as Partial<Settings>)
+
+    expect(result).toEqual({ success: true, restartRequired: true })
+  })
+
+  it('Test 5: updateSettings 解析 restartRequired=false', async () => {
+    mockUpdateOk(false)
+    const result = await updateSettings({
+      sync: {
+        syncEnabled: true,
+        autoSyncEnabled: true,
+        syncFrequency: 'realtime',
+        contentTypes: {
+          text: true,
+          image: true,
+          link: true,
+          file: true,
+          codeSnippet: true,
+          richText: true,
+        },
+      },
+    } as Partial<Settings>)
+
+    expect(result).toEqual({ success: true, restartRequired: false })
+  })
+
+  it('Test 6: updateSettings PUT body.network 含 allowRelayFallback', async () => {
+    mockUpdateOk(true)
+    await updateSettings({
+      network: { allowRelayFallback: false },
+    } as Partial<Settings>)
+
+    expect(updateSdkMock).toHaveBeenCalledTimes(1)
+    const [options] = updateSdkMock.mock.calls[0]
+    expect(options.body.network).toEqual({ allowRelayFallback: false })
+  })
+})
+
+describe('settings api — relay credentials', () => {
+  const url = 'https://relay.example.com'
+
+  it('queries only whether a relay access token is configured', async () => {
+    getRelayCredentialStatusSdkMock.mockResolvedValueOnce({
+      data: { data: { configured: true }, ts: 0 },
+    })
+
+    await expect(getRelayCredentialStatus(url)).resolves.toEqual({ configured: true })
+    expect(getRelayCredentialStatusSdkMock).toHaveBeenCalledWith({
+      body: { url },
+      throwOnError: true,
+    })
+  })
+
+  it('saves relay settings and its replacement token in one request', async () => {
+    const savedSettings = makeBaseSettings({
+      network: {
+        allowRelayFallback: true,
+        allowOverlayNetworkAddrs: false,
+        customRelayUrls: [`${url}/`],
+        congestionController: 'cubic',
+      },
+    })
+    saveRelaySdkMock.mockResolvedValueOnce({
+      data: {
+        data: {
+          success: true,
+          restartRequired: true,
+          credentialStatus: { configured: true },
+          settings: savedSettings,
+        },
+        ts: 0,
+      },
+    })
+
+    await expect(
+      saveRelay({ network: { customRelayUrls: [url] } }, url, {
+        action: 'set',
+        accessToken: 'replacement-token',
+      })
+    ).resolves.toEqual({
+      success: true,
+      restartRequired: true,
+      credentialStatus: { configured: true },
+      settings: savedSettings,
+    })
+    expect(saveRelaySdkMock).toHaveBeenCalledWith({
+      body: {
+        settings: { network: { customRelayUrls: [url] } },
+        url,
+        credential: { action: 'set', accessToken: 'replacement-token' },
+      },
+      throwOnError: true,
+    })
+  })
+
+  it.each([
+    [{ mode: 'stored' } as const, { mode: 'stored' }],
+    [{ mode: 'none' } as const, { mode: 'none' }],
+    [
+      { mode: 'override', accessToken: 'draft-token' } as const,
+      { mode: 'override', accessToken: 'draft-token' },
+    ],
+  ])('sends the selected probe credential mode %#', async (credential, expected) => {
+    probeRelayUrlSdkMock.mockResolvedValueOnce({
+      data: { data: { tag: 'success', latencyMs: 37 }, ts: 0 },
+    })
+
+    await expect(probeRelayUrl(url, credential)).resolves.toEqual({
+      kind: 'success',
+      latencyMs: 37,
+    })
+    expect(probeRelayUrlSdkMock).toHaveBeenCalledWith({
+      body: { url, credential: expected },
+      throwOnError: true,
+    })
+  })
+})
+
+/**
+ * 反向命名铁律 fence (Pitfall 1) — 任何引入反向布尔镜像字段或在
+ * types / api 层做取反操作的回归会被这一组断言钉死。
+ *
+ * 现实层面的 grep 守门由 plan acceptance criteria 在 CI 之外执行；
+ * 这里以单测形式锁住前端 store 的字段名与方向语义。
+ */
+describe('反向命名审计 (Pitfall 1 fence)', () => {
+  it('Settings.network 字段名是 allowRelayFallback 不是反向布尔镜像', () => {
+    const sample: Settings['network'] = {
+      allowRelayFallback: true,
+      allowOverlayNetworkAddrs: false,
+      customRelayUrls: [],
+      congestionController: 'cubic',
+    }
+    const keys = Object.keys(sample)
+    expect(keys).toContain('allowRelayFallback')
+    // 任何反向布尔镜像字段出现都视为回归 — 字段名通过 join 拼接以避免被
+    // plan acceptance grep 当作字面命中
+    const FORBIDDEN_MIRROR_FIELDS = [
+      ['lan', 'Only'].join(''),
+      ['disable', 'Relay'].join(''),
+      ['disable', 'Relays'].join(''),
+    ]
+    for (const forbidden of FORBIDDEN_MIRROR_FIELDS) {
+      expect(keys).not.toContain(forbidden)
+    }
+  })
+
+  it('toSettingsPatchRequest 不取反 — true 输入 → patch 含 true（已由 Test 2 覆盖，此断言为冗余 fence）', async () => {
+    mockUpdateOk(false)
+    await updateSettings({
+      network: { allowRelayFallback: true },
+    } as Partial<Settings>)
+
+    const [options] = updateSdkMock.mock.calls[0]
+    // 显式断言不被悄悄取反（防御 toSettingsPatchRequest 内部加 ! 表达式）
+    expect(options.body.network.allowRelayFallback).toBe(true)
+    expect(options.body.network.allowRelayFallback).not.toBe(false)
+  })
+})

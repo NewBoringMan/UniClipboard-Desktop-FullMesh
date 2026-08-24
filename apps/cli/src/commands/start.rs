@@ -1,0 +1,253 @@
+//! Start command -- launches the daemon in background or foreground mode.
+
+use std::fmt;
+use std::process::Stdio;
+
+use serde::Serialize;
+use uc_daemon_contract::api::types::DaemonResidency;
+
+use crate::exit_codes;
+use crate::local_daemon;
+use crate::output;
+
+#[derive(Serialize)]
+pub struct StartOutput {
+    pub status: &'static str,
+    pub pid: Option<u32>,
+}
+
+impl fmt::Display for StartOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.status, self.pid) {
+            ("started", Some(pid)) => write!(f, "Daemon started (pid {})", pid),
+            ("already_running", Some(pid)) => write!(f, "Daemon already running (pid {})", pid),
+            ("started", None) => write!(f, "Daemon started"),
+            ("already_running", None) => write!(f, "Daemon already running"),
+            (status, Some(pid)) => write!(f, "Daemon {} (pid {})", status, pid),
+            (status, None) => write!(f, "Daemon {}", status),
+        }
+    }
+}
+
+/// Run the start command.
+pub async fn run(foreground: bool, server: bool, json: bool, verbose: bool) -> i32 {
+    if server {
+        // Translate the user's `--server` flag into the daemon spawn
+        // contract. The spawned `uniclipd` child inherits this process's
+        // env (same pattern as `--profile` / `UC_PROFILE`); the daemon
+        // resolves it via `run_standalone_from_env`. The CLI deliberately
+        // does NOT resolve the run mode or touch clipboard switches here —
+        // that knowledge lives in the daemon binary (ADR-007 §2.2).
+        std::env::set_var(
+            uc_daemon_process::spawn_contract::RUN_MODE_ENV,
+            uc_daemon_process::spawn_contract::RUN_MODE_SERVER,
+        );
+    } else {
+        std::env::remove_var(uc_daemon_process::spawn_contract::RUN_MODE_ENV);
+    }
+
+    if let Some(code) = check_setup_complete(json, verbose).await {
+        return code;
+    }
+
+    if foreground {
+        run_foreground(json, verbose).await
+    } else {
+        run_background(json, server).await
+    }
+}
+
+/// Map the user's `--server` flag to the daemon residency a controlled-restart
+/// promotion should converge on (ADR-008 P5-L L8d-2): `--server` →
+/// [`DaemonResidency::ServerHeadless`], otherwise [`DaemonResidency::Standalone`].
+///
+/// Promotion is background-only; foreground does its own spawn (see
+/// [`run_foreground`]), so this mapping is only consulted by [`run_background`].
+fn promote_target_residency(server: bool) -> DaemonResidency {
+    if server {
+        DaemonResidency::ServerHeadless
+    } else {
+        DaemonResidency::Standalone
+    }
+}
+
+/// Block `start` if Space setup hasn't completed for the active
+/// profile. Uses a thin filesystem check ([`crate::setup_check::is_setup_complete`])
+/// that reads the `.setup_status` JSON file (and legacy marker) directly,
+/// avoiding the heavy `uc-bootstrap` assembly stack.
+///
+/// Returns `Some(exit_code)` to block, `None` to proceed.
+async fn check_setup_complete(json: bool, _verbose: bool) -> Option<i32> {
+    // Resolution failure (e.g. missing app dirs) → let daemon surface
+    // the underlying error rather than masking it here.
+    if crate::setup_check::is_setup_complete().unwrap_or(true) {
+        return None;
+    }
+
+    if json {
+        let _ = output::print_result(
+            &StartOutput {
+                status: "setup_required",
+                pid: None,
+            },
+            true,
+        );
+    } else {
+        eprintln!(
+            "Error: setup not complete. Run `uniclip init` (new Space) or \
+             `uniclip join` (existing Space) first, then retry `start`."
+        );
+    }
+    Some(exit_codes::EXIT_ERROR)
+}
+
+async fn run_background(json: bool, server: bool) -> i32 {
+    // ADR-008 P5-L L8d-2: background `start` is promote-aware. If a transient
+    // Oneshot daemon is running it requests a controlled restart to converge on
+    // the persistent `target` residency; otherwise it behaves exactly as before
+    // (reuse a compatible daemon, error on incompatible, spawn when absent).
+    // In production no Oneshot daemon exists, so the promote branch is dead code.
+    let target = promote_target_residency(server);
+    run_start_background_with(
+        || local_daemon::ensure_or_promote_local_daemon(target),
+        || uc_daemon_process::process_metadata::read_pid_metadata().map(|opt| opt.map(|m| m.pid)),
+    )
+    .await
+    .map_or_else(
+        |msg| {
+            eprintln!("Error: {}", msg);
+            exit_codes::EXIT_ERROR
+        },
+        |output| {
+            if let Err(e) = crate::output::print_result(&output, json) {
+                eprintln!("Error: {}", e);
+                return exit_codes::EXIT_ERROR;
+            }
+            exit_codes::EXIT_SUCCESS
+        },
+    )
+}
+
+async fn run_foreground(json: bool, _verbose: bool) -> i32 {
+    // ADR-008 P5-L L8d-2: controlled-restart promotion is background-only —
+    // foreground is probe-only + its own foreground spawn (below), so the
+    // `--server` → residency mapping does not apply here.
+    //
+    // Check if daemon is already running using probe-only (no spawn).
+    // We must NOT use ensure_local_daemon_running() here because it would
+    // spawn a background daemon, conflicting with the foreground spawn below.
+    //
+    // ADR-008 P5-L L2: classify the probe. Compatible → report already_running;
+    // Incompatible → surface a clear error and refuse to spawn a competitor
+    // (restart/takeover is L8); Absent → fall through to the foreground spawn.
+    match local_daemon::probe_running().await {
+        Ok(uc_daemon_contract::probe::ProbeOutcome::Compatible(_)) => {
+            let pid = uc_daemon_process::process_metadata::read_pid_metadata()
+                .ok()
+                .flatten()
+                .map(|m| m.pid);
+            let out = StartOutput {
+                status: "already_running",
+                pid,
+            };
+            if let Err(e) = output::print_result(&out, json) {
+                eprintln!("Error: {}", e);
+                return exit_codes::EXIT_ERROR;
+            }
+            return exit_codes::EXIT_SUCCESS;
+        }
+        Ok(outcome @ uc_daemon_contract::probe::ProbeOutcome::Incompatible { .. }) => {
+            eprintln!(
+                "Error: {}",
+                local_daemon::incompatible_outcome_error(outcome)
+            );
+            return exit_codes::EXIT_ERROR;
+        }
+        // Absent or probe error → proceed to spawn the foreground daemon.
+        Ok(uc_daemon_contract::probe::ProbeOutcome::Absent) | Err(_) => {}
+    }
+
+    let daemon_exe = match uc_daemon_process::spawn::resolve_daemon_exe_path() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return exit_codes::EXIT_ERROR;
+        }
+    };
+
+    if !json {
+        println!("Starting daemon in foreground... (press Ctrl+C to stop)");
+    }
+
+    let mut child = match std::process::Command::new(&daemon_exe)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(e) => {
+            eprintln!("Error: failed to spawn daemon: {}", e);
+            return exit_codes::EXIT_ERROR;
+        }
+    };
+
+    match child.wait() {
+        Ok(_) => exit_codes::EXIT_SUCCESS,
+        Err(e) => {
+            eprintln!("Error: failed to wait for daemon process: {}", e);
+            exit_codes::EXIT_ERROR
+        }
+    }
+}
+
+/// Testable inner implementation that accepts injectable closures.
+///
+/// `ensure_daemon` should probe and/or spawn the daemon, returning a session.
+/// `read_pid` should return the daemon PID from the PID file.
+pub(crate) async fn run_start_background_with<EnsureDaemon, EnsureFuture, ReadPid>(
+    ensure_daemon: EnsureDaemon,
+    read_pid: ReadPid,
+) -> Result<StartOutput, String>
+where
+    EnsureDaemon: FnOnce() -> EnsureFuture,
+    EnsureFuture: std::future::Future<
+        Output = Result<local_daemon::LocalDaemonSession, local_daemon::LocalDaemonError>,
+    >,
+    ReadPid: FnOnce() -> anyhow::Result<Option<u32>>,
+{
+    let session = ensure_daemon().await.map_err(|e| e.to_string())?;
+
+    let pid = read_pid().ok().flatten();
+
+    let status = if session.spawned {
+        "started"
+    } else {
+        "already_running"
+    };
+
+    Ok(StartOutput { status, pid })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_flag_maps_to_server_headless_residency() {
+        assert_eq!(
+            promote_target_residency(true),
+            DaemonResidency::ServerHeadless,
+            "--server must promote toward a headless server node"
+        );
+    }
+
+    #[test]
+    fn no_server_flag_maps_to_standalone_residency() {
+        assert_eq!(
+            promote_target_residency(false),
+            DaemonResidency::Standalone,
+            "the default `start` must promote toward a standalone node"
+        );
+    }
+}
