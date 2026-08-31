@@ -217,6 +217,6 @@ exit 0
       expect(result.status).toBe(1)
       expect(Date.now() - startedAt).toBeLessThan(2500)
       expect(result.stderr).toContain('FAIL: bob exit status 23')
-    },
+    }
   )
 })

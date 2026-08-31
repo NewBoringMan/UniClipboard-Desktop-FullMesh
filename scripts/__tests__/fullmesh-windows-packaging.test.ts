@@ -28,7 +28,7 @@ describe('FullMesh Windows package matrix', () => {
     expect(script).toContain("ValidateSet('x64', 'arm64')")
     expect(script).toContain('New-SelfSignedCertificate')
     expect(script).toContain('Export-Certificate')
-    expect(script).toContain("Cert:\\LocalMachine\\TrustedPeople")
+    expect(script).toContain('Cert:\\LocalMachine\\TrustedPeople')
     expect(script).not.toContain('Cert:\\CurrentUser\\Root')
     expect(script).not.toContain('certutil.exe')
     expect(script).toContain('signtool verify')
